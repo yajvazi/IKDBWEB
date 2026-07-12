@@ -5,18 +5,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { LockKeyhole, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { showToast } from "@/lib/toastify";
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("admin@internetkudo.com");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
     setLoading(true);
 
     try {
@@ -32,7 +31,7 @@ export function LoginForm() {
       router.replace(next?.startsWith("/admin") && next !== "/admin/login" ? next : "/admin/dashboard");
       router.refresh();
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "Login failed.");
+      showToast(loginError instanceof Error ? loginError.message : "Login failed.", "error");
     } finally {
       setLoading(false);
     }
@@ -76,12 +75,6 @@ export function LoginForm() {
             />
           </label>
 
-          {error ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-              {error}
-            </div>
-          ) : null}
-
           <Button type="submit" className="h-11 w-full" disabled={loading}>
             <LogIn className="h-4 w-4" />
             {loading ? "Signing in..." : "Sign in"}
@@ -91,4 +84,3 @@ export function LoginForm() {
     </main>
   );
 }
-
