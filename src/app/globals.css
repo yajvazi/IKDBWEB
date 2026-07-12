@@ -132,18 +132,78 @@
   }
 }
 
-.toastify.internetkudo-toast-popup {
+.toastify.internetkudo-toast {
   position: fixed !important;
   inset: auto !important;
   left: 50% !important;
-  top: 50% !important;
-  width: min(420px, calc(100vw - 32px)) !important;
-  transform: translate(-50%, -50%) !important;
+  top: 18px !important;
+  width: min(460px, calc(100vw - 28px)) !important;
+  min-height: 48px;
+  transform: translateX(-50%) !important;
   z-index: 99999 !important;
-  text-align: center;
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px !important;
+  border: 1px solid #e5e7eb !important;
+  background: #ffffff !important;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+  color: #111827 !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  padding: 13px 16px 13px 14px !important;
+  text-align: left;
+  letter-spacing: 0;
 }
 
-.toastify.internetkudo-toast-popup .toast-close {
-  margin-left: 12px;
-  opacity: 0.72;
+.toastify.internetkudo-toast::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #004ffe;
+  box-shadow: 0 0 0 4px rgba(0, 79, 254, 0.12);
+}
+
+.toastify.internetkudo-toast-success {
+  border-color: #bbf7d0 !important;
+}
+
+.toastify.internetkudo-toast-success::before {
+  background: #16a34a;
+  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.14);
+}
+
+.toastify.internetkudo-toast-error {
+  border-color: #fecaca !important;
+}
+
+.toastify.internetkudo-toast-error::before {
+  background: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.14);
+}
+
+.toastify.internetkudo-toast-warning {
+  border-color: #fde68a !important;
+}
+
+.toastify.internetkudo-toast-warning::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.16);
+}
+
+.toastify.internetkudo-toast-info::before {
+  background: #004ffe;
+  box-shadow: 0 0 0 4px rgba(0, 79, 254, 0.12);
+}
+
+@media (max-width: 640px) {
+  .toastify.internetkudo-toast {
+    top: 12px !important;
+    width: calc(100vw - 24px) !important;
+    font-size: 13px !important;
+    padding: 12px 14px !important;
+  }
 }
