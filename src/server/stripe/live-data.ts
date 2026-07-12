@@ -89,7 +89,7 @@ export async function getStripeOrdersWorkspaceConfig(options: StripeCursorOption
     }),
     getAllPaymentIntents(stripe),
   ]);
-  const records = page.data.map(paymentIntentToOrderRecord);
+  const records = allPaymentIntents.map(paymentIntentToOrderRecord);
   const succeeded = allPaymentIntents.filter((payment) => payment.status === "succeeded");
   const failed = allPaymentIntents.filter((payment) => payment.status === "requires_payment_method" || payment.status === "canceled");
   const processing = allPaymentIntents.filter((payment) => ["processing", "requires_action", "requires_confirmation"].includes(payment.status));
@@ -100,8 +100,8 @@ export async function getStripeOrdersWorkspaceConfig(options: StripeCursorOption
     modeLabel: "LIVE",
     primaryAction: "Create order",
     operationsLogTitle: "Live Stripe order feed",
-    operationsLogDescription: "Rows are derived from live Stripe PaymentIntents until local InternetKudo order persistence is populated.",
-    description: "Live order view derived from Stripe PaymentIntents. Local fulfillment, eSIM ownership, and OCS request links appear when checkout writes InternetKudo orders to Postgres.",
+    operationsLogDescription: "Rows are derived from every live Stripe PaymentIntent until local InternetKudo order persistence is populated.",
+    description: "Live order view derived from every Stripe PaymentIntent since the account began. Local fulfillment, eSIM ownership, and OCS request links appear when checkout writes InternetKudo orders to Postgres.",
     summary: [
       { label: "Visible Stripe orders", value: records.length.toLocaleString(), tone: "info" },
       { label: "All Stripe orders", value: allPaymentIntents.length.toLocaleString(), tone: "info" },
@@ -112,14 +112,11 @@ export async function getStripeOrdersWorkspaceConfig(options: StripeCursorOption
     ],
     records,
     emptyState: "No Stripe PaymentIntents found for the connected account.",
-    pagination: {
-      label: "Full Stripe order history",
-      note: page.has_more
-        ? "Showing one live Stripe page. Use Next older page to continue through every PaymentIntent since the account began."
-        : "You are at the oldest available Stripe PaymentIntent page.",
-      nextHref: page.has_more && records.at(-1) ? `/admin/orders?starting_after=${encodeURIComponent(records.at(-1)!.id)}` : undefined,
+    pagination: page.has_more || options.startingAfter ? {
+      label: "Full Stripe order history loaded",
+      note: `Showing ${records.length.toLocaleString()} PaymentIntents from Stripe history. Pagination controls are disabled because this page now searches the full loaded history.`,
       resetHref: options.startingAfter ? "/admin/orders" : undefined,
-    },
+    } : undefined,
   };
 }
 

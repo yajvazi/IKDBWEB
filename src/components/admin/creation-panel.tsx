@@ -105,6 +105,10 @@ function formatBalance(value: unknown) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" }).format(parsed);
 }
 
+function normalizePackageTemplateName(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function safetyClass(safety: OcsCommandSafety) {
   if (safety === "read") return "border-blue-100 bg-blue-50 text-blue-700";
   if (safety === "write") return "border-lime-200 bg-lime-50 text-green-700";
@@ -510,6 +514,15 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
     }
     if (!templateName.trim()) {
       showToast("Template name is required.", "warning");
+      return;
+    }
+    const normalizedTemplateName = normalizePackageTemplateName(templateName);
+    const duplicateTemplate = packageTemplates.find((template) => {
+      const existingName = String(template.prepaidpackagetemplatename ?? template.userUiName ?? "");
+      return normalizePackageTemplateName(existingName) === normalizedTemplateName;
+    });
+    if (duplicateTemplate) {
+      showToast(`A package template named "${templateName}" already exists in OCS. Use a unique name.`, "warning");
       return;
     }
     const payload = commandPayload<Record<string, unknown>>(packageTemplateCommand, "createPrepaidPackageTemplate");

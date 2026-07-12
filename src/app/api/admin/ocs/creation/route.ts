@@ -166,9 +166,16 @@ export async function POST(request: NextRequest) {
     }
 
     const client = getOcsClient();
-    const command = parsed.data.action === "createLocationZone"
-      ? createLocationZoneCommand(parsed.data.payload)
-      : createPrepaidPackageTemplateCommand(parsed.data.payload);
+    let command: Record<string, unknown>;
+    if (parsed.data.action === "createLocationZone") {
+      command = createLocationZoneCommand(parsed.data.payload);
+    } else {
+      const duplicate = await packageTemplateNameExists(client, parsed.data.payload.resellerid, parsed.data.payload.prepaidpackagetemplatename);
+      if (duplicate) {
+        return fail("DUPLICATE_PACKAGE_TEMPLATE_NAME", "A package template with this name already exists in OCS. Use a unique package template name.", 409, requestId);
+      }
+      command = createPrepaidPackageTemplateCommand(parsed.data.payload);
+    }
 
     const response = await client.executeCommand(command);
 
@@ -235,10 +242,36 @@ async function addResellerInfoBalances(response: Record<string, unknown>, client
   };
 }
 
+async function packageTemplateNameExists(client: ReturnType<typeof getOcsClient>, resellerId: number, templateName: string) {
+  try {
+    const response = await client.executeCommand(listPrepaidPackageTemplateCommand({ resellerId }));
+    const templatesRoot = response.listPrepaidPackageTemplate;
+    const templates = Array.isArray(templatesRoot)
+      ? templatesRoot
+      : templatesRoot && typeof templatesRoot === "object" && Array.isArray((templatesRoot as { template?: unknown }).template)
+        ? (templatesRoot as { template: unknown[] }).template
+        : [];
+    const normalizedName = normalizePackageTemplateName(templateName);
+
+    return templates.some((template) => {
+      if (!template || typeof template !== "object") return false;
+      const templateRecord = template as Record<string, unknown>;
+      const existingName = String(templateRecord.prepaidpackagetemplatename ?? templateRecord.userUiName ?? "");
+      return normalizePackageTemplateName(existingName) === normalizedName;
+    });
+  } catch (error) {
+    console.warn("OCS duplicate package-template preflight failed; continuing with upstream create", {
+      message: error instanceof Error ? error.message : "Unknown preflight error",
+    });
+    return false;
+  }
+}
+
 function handleError(error: unknown, requestId: string) {
   if (error instanceof OcsApiError) {
     const upstreamName = ocsErrorDescriptions[error.upstreamCode as keyof typeof ocsErrorDescriptions] ?? "UNKNOWN_OCS_ERROR";
     const upstreamMessage = safeUpstreamMessage(error.upstreamMessage);
+    const duplicatePackageTemplateName = isDuplicatePackageTemplateNameError(upstreamMessage);
 
     console.warn("OCS creation upstream error", {
       requestId,
@@ -251,8 +284,10 @@ function handleError(error: unknown, requestId: string) {
 
     return fail(
       "OCS_UPSTREAM_ERROR",
-      `OCS ${error.upstreamCode} ${upstreamName}: ${upstreamMessage}`,
-      error.httpStatus,
+      duplicatePackageTemplateName
+        ? "A package template with this name already exists in OCS. Use a unique package template name."
+        : `OCS ${error.upstreamCode} ${upstreamName}: ${upstreamMessage}`,
+      duplicatePackageTemplateName ? 409 : error.httpStatus,
       requestId,
     );
   }
@@ -269,4 +304,14 @@ function safeUpstreamMessage(message: string) {
   const redacted = redactOcsPayload({ message }).message;
   if (typeof redacted !== "string" || redacted.trim().length === 0) return "The upstream service did not provide details.";
   return redacted.trim().slice(0, 240);
+}
+
+function isDuplicatePackageTemplateNameError(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("pre_paid_package_template_name_unique")
+    || (normalized.includes("duplicate entry") && normalized.includes("package"));
+}
+
+function normalizePackageTemplateName(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }

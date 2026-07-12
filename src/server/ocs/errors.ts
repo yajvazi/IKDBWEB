@@ -33,6 +33,8 @@ export function mapOcsStatusToHttp(code: number): { httpStatus: number; retryabl
       return { httpStatus: 200, retryable: false, publicMessage: "OK" };
     case 2:
       return { httpStatus: 400, retryable: false, publicMessage: "The upstream request was invalid." };
+    case 4:
+      return { httpStatus: 409, retryable: false, publicMessage: "The upstream record already exists." };
     case 6:
       return { httpStatus: 404, retryable: false, publicMessage: "The requested upstream resource was not found." };
     case 9:
