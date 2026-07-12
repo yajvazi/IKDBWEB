@@ -255,5 +255,11 @@ function mockCommandResponse(command: Record<string, unknown>): Record<string, u
     };
   }
 
+  if (commandName === "affectPackageToSubscriber") {
+    return {
+      status: { code: 0, msg: "OK" },
+    };
+  }
+
   return { status: { code: 0, msg: "OK" }, [commandName ?? "unknown"]: {} };
 }

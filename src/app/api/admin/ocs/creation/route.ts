@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  affectPackageToSubscriberCommand,
   createLocationZoneCommand,
   createPrepaidPackageTemplateCommand,
   getResellerInfoCommand,
@@ -63,7 +64,17 @@ const createPackageTemplateSchema = z.object({
   }),
 });
 
-const mutationSchema = z.discriminatedUnion("action", [createLocationZoneSchema, createPackageTemplateSchema]);
+const affectPackageToSubscriberSchema = z.object({
+  action: z.literal("affectPackageToSubscriber"),
+  reason: z.string().min(8),
+  payload: z.object({
+    packageTemplateId: z.number().int().positive(),
+    accountForSubs: z.number().int().positive(),
+    validityPeriod: z.number().int().positive().optional(),
+  }),
+});
+
+const mutationSchema = z.discriminatedUnion("action", [createLocationZoneSchema, createPackageTemplateSchema, affectPackageToSubscriberSchema]);
 
 function ok(data: unknown, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({
@@ -169,12 +180,14 @@ export async function POST(request: NextRequest) {
     let command: Record<string, unknown>;
     if (parsed.data.action === "createLocationZone") {
       command = createLocationZoneCommand(parsed.data.payload);
-    } else {
+    } else if (parsed.data.action === "createPrepaidPackageTemplate") {
       const duplicate = await packageTemplateNameExists(client, parsed.data.payload.resellerid, parsed.data.payload.prepaidpackagetemplatename);
       if (duplicate) {
         return fail("DUPLICATE_PACKAGE_TEMPLATE_NAME", "A package template with this name already exists in OCS. Use a unique package template name.", 409, requestId);
       }
       command = createPrepaidPackageTemplateCommand(parsed.data.payload);
+    } else {
+      command = affectPackageToSubscriberCommand(parsed.data.payload);
     }
 
     const response = await client.executeCommand(command);

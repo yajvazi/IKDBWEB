@@ -121,6 +121,23 @@ export function getOpenApiSpec() {
             },
           },
         },
+        OcsAffectPackageToSubscriberRequest: {
+          type: "object",
+          required: ["action", "reason", "payload"],
+          properties: {
+            action: { const: "affectPackageToSubscriber" },
+            reason: { type: "string", minLength: 8 },
+            payload: {
+              type: "object",
+              required: ["packageTemplateId", "accountForSubs"],
+              properties: {
+                packageTemplateId: { type: "integer", minimum: 1 },
+                accountForSubs: { type: "integer", minimum: 1 },
+                validityPeriod: { type: "integer", minimum: 1 },
+              },
+            },
+          },
+        },
       },
     },
     paths: {
@@ -171,8 +188,8 @@ export function getOpenApiSpec() {
         },
         post: {
           tags: ["OCS Admin"],
-          summary: "Create OCS location zones or prepaid package templates",
-          description: "Server-side admin route for documented OCS creation commands. Package templates require reason and validated fields. Location-zone creation also requires exact typed confirmation.",
+          summary: "Run documented OCS creation commands",
+          description: "Server-side admin route for documented OCS creation commands, including account-based affectPackageToSubscriber package creation. Package templates require reason and validated fields. Location-zone creation also requires exact typed confirmation.",
           requestBody: {
             required: true,
             content: {
@@ -181,6 +198,7 @@ export function getOpenApiSpec() {
                   oneOf: [
                     { $ref: "#/components/schemas/OcsCreateLocationZoneRequest" },
                     { $ref: "#/components/schemas/OcsCreatePackageTemplateRequest" },
+                    { $ref: "#/components/schemas/OcsAffectPackageToSubscriberRequest" },
                   ],
                 },
               },

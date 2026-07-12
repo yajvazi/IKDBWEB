@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buildOcsCommand, ocsCommandCatalog, ocsCommandGroups, type OcsCommandSafety } from "@/lib/ocs/catalog";
+import { bytesToHuman } from "@/lib/bytes/format";
 import { showToast } from "@/lib/toastify";
 import { cn } from "@/lib/utils";
 
@@ -55,9 +56,17 @@ type ResellerWithAccounts = {
   account?: ResellerAccount[];
 };
 
+type CreatedAccountPackage = {
+  account: ResellerAccount | null;
+  template: Record<string, unknown> | null;
+  command: unknown;
+  response: unknown;
+  createdAt: string;
+};
+
 const tabs: { key: TabKey; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { key: "assign", label: "Assign Package", icon: Send },
-  { key: "template", label: "Create Package", icon: PackagePlus },
+  { key: "assign", label: "Create Package", icon: Send },
+  { key: "template", label: "Package Template", icon: PackagePlus },
   { key: "location", label: "Location Zone", icon: Network },
   { key: "qr", label: "QR Codes", icon: QrCode },
   { key: "catalog", label: "OCS APIs", icon: FileJson2 },
@@ -107,6 +116,19 @@ function formatBalance(value: unknown) {
 
 function normalizePackageTemplateName(value: string) {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function templateId(template: Record<string, unknown>) {
+  return template.prepaidpackagetemplateid ?? template.packageTemplateId ?? template.id;
+}
+
+function templateDisplayName(template: Record<string, unknown>) {
+  return String(template.prepaidpackagetemplatename ?? template.userUiName ?? template.name ?? `Package ${String(templateId(template) ?? "")}`);
+}
+
+function templateData(template: Record<string, unknown>) {
+  const bytes = Number(template.databyte ?? template.pckdatabyte ?? 0);
+  return bytes > 0 ? bytesToHuman(bytes) : "n/a";
 }
 
 function safetyClass(safety: OcsCommandSafety) {
@@ -316,13 +338,12 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   const [templateReason, setTemplateReason] = useState("Create sellable InternetKudo package template");
   const [selectedResellerId, setSelectedResellerId] = useState(resellerId);
 
-  const [identifierType, setIdentifierType] = useState("subscriberId");
-  const [identifier, setIdentifier] = useState("1000");
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [packageTemplateId, setPackageTemplateId] = useState("553");
-  const [validityPeriod, setValidityPeriod] = useState("");
-  const [activeStart, setActiveStart] = useState("");
-  const [activeEnd, setActiveEnd] = useState("");
+  const [packageTemplateSearch, setPackageTemplateSearch] = useState("");
+  const [validityPeriod, setValidityPeriod] = useState("30");
+  const [createdAccountPackage, setCreatedAccountPackage] = useState<CreatedAccountPackage | null>(null);
+  const [createdPackageQrUrl, setCreatedPackageQrUrl] = useState("");
 
   const [templateName, setTemplateName] = useState("InternetKudo Global Connect 10GB");
   const [templateLocationZoneId, setTemplateLocationZoneId] = useState("");
@@ -357,29 +378,48 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   }, [qrInput]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!createdAccountPackage) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    QRCode.toDataURL(jsonString({
+      type: "internetkudo-ocs-account-package",
+      createdAt: createdAccountPackage.createdAt,
+      accountId: createdAccountPackage.account?.id ?? null,
+      packageTemplateId: createdAccountPackage.template ? templateId(createdAccountPackage.template) : null,
+      packageTemplateName: createdAccountPackage.template ? templateDisplayName(createdAccountPackage.template) : null,
+      command: createdAccountPackage.command,
+      response: createdAccountPackage.response,
+    }), {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 288,
+      color: { dark: "#111827", light: "#FFFFFF" },
+    }).then((url) => {
+      if (!cancelled) setCreatedPackageQrUrl(url);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [createdAccountPackage]);
+
+  useEffect(() => {
     void loadOverview(false);
     // Initial inventory load only; reseller changes are handled by changeSelectedReseller.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const packageAssignmentCommand = useMemo(() => {
-    const subscriberValue = identifierType === "subscriberId" ? numberOrUndefined(identifier) : identifier.trim();
-    if (identifierType === "accountForSubs") {
-      return buildOcsCommand("affectPackageToSubscriber", cleanObject({
-        packageTemplateId: numberOrUndefined(packageTemplateId),
-        accountForSubs: numberOrUndefined(selectedAccountId),
-        validityPeriod: numberOrUndefined(validityPeriod),
-        activePeriod: activeStart && activeEnd ? { start: activeStart, end: activeEnd } : undefined,
-      }));
-    }
-    const payload = cleanObject({
+    return buildOcsCommand("affectPackageToSubscriber", cleanObject({
       packageTemplateId: numberOrUndefined(packageTemplateId),
-      subscriber: subscriberValue ? { [identifierType]: subscriberValue } : undefined,
       validityPeriod: numberOrUndefined(validityPeriod),
-      activePeriod: activeStart && activeEnd ? { start: activeStart, end: activeEnd } : undefined,
-    });
-    return buildOcsCommand("affectPackageToSubscriber", payload);
-  }, [activeEnd, activeStart, identifier, identifierType, packageTemplateId, selectedAccountId, validityPeriod]);
+      accountForSubs: numberOrUndefined(selectedAccountId),
+    }));
+  }, [packageTemplateId, selectedAccountId, validityPeriod]);
 
   const packageTemplateCommand = useMemo(() => {
     const dataGb = numberOrUndefined(templateDataGb);
@@ -432,6 +472,18 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   const locationZones = readArray(overview?.locationZones, "listDetailedLocationZone");
   const destinationLists = readArray(overview?.destinationLists, "listDetailedDestinationList");
   const packageTemplates = readArray(overview?.packageTemplates, "listPrepaidPackageTemplate");
+  const selectedPackageTemplate = useMemo(() => {
+    return packageTemplates.find((template) => String(templateId(template)) === packageTemplateId) ?? null;
+  }, [packageTemplateId, packageTemplates]);
+  const filteredPackageTemplates = useMemo(() => {
+    const query = packageTemplateSearch.trim().toLowerCase();
+    return packageTemplates
+      .filter((template) => {
+        const label = `${templateId(template) ?? ""} ${templateDisplayName(template)} ${templateData(template)}`.toLowerCase();
+        return !query || label.includes(query);
+      })
+      .slice(0, 160);
+  }, [packageTemplateSearch, packageTemplates]);
   const filteredLocationZones = useMemo(() => {
     const query = locationZoneSearch.trim().toLowerCase();
     return locationZones
@@ -459,6 +511,12 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
         const firstAccount = activeReseller?.account?.[0];
         if (!selectedAccountId && firstAccount?.id) setSelectedAccountId(String(firstAccount.id));
       }
+      const loadedTemplates = readArray(json.data.packageTemplates, "listPrepaidPackageTemplate");
+      if (loadedTemplates.length > 0 && !loadedTemplates.some((template) => String(templateId(template)) === packageTemplateId)) {
+        const firstTemplate = loadedTemplates[0];
+        setPackageTemplateId(String(templateId(firstTemplate) ?? ""));
+        if (!validityPeriod && firstTemplate.perioddays) setValidityPeriod(String(firstTemplate.perioddays));
+      }
       if (notify) showToast("OCS inventory loaded.", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load OCS inventory.";
@@ -480,6 +538,10 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       const activeReseller = loadedResellers.find((item) => String(item.id) === id);
       const firstAccount = activeReseller?.account?.[0];
       setSelectedAccountId(firstAccount?.id ? String(firstAccount.id) : "");
+      const loadedTemplates = readArray(json.data.packageTemplates, "listPrepaidPackageTemplate");
+      const firstTemplate = loadedTemplates[0];
+      setPackageTemplateId(firstTemplate ? String(templateId(firstTemplate) ?? "") : "");
+      setValidityPeriod(firstTemplate?.perioddays ? String(firstTemplate.perioddays) : "30");
       showToast(`Loaded reseller ${id}.`, "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load reseller inventory.";
@@ -487,6 +549,36 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
     } finally {
       setLoadingOverview(false);
     }
+  }
+
+  async function createAccountPackage() {
+    if (!selectedAccountId.trim()) {
+      showToast("Select an OCS account ID before creating the package.", "warning");
+      return;
+    }
+    if (!packageTemplateId.trim()) {
+      showToast("Select an OCS package template ID before creating the package.", "warning");
+      return;
+    }
+
+    const payload = commandPayload<Record<string, unknown>>(packageAssignmentCommand, "affectPackageToSubscriber");
+    const result = await submitMutation({
+      action: "affectPackageToSubscriber",
+      payload,
+      reason: "Create package for OCS account",
+    }, { refresh: false, successMessage: "Package created for selected OCS account." });
+
+    if (!result) return;
+
+    const selectedAccount = selectedResellerAccounts.find((account) => String(account.id) === selectedAccountId) ?? null;
+    setCreatedPackageQrUrl("");
+    setCreatedAccountPackage({
+      account: selectedAccount,
+      template: selectedPackageTemplate,
+      command: packageAssignmentCommand,
+      response: result.response,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   async function createLocationZone() {
@@ -533,7 +625,7 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
     });
   }
 
-  async function submitMutation(body: Record<string, unknown>) {
+  async function submitMutation(body: Record<string, unknown>, options: { refresh?: boolean; successMessage?: string } = {}) {
     setSubmittingAction(String(body.action ?? "ocs"));
     try {
       const response = await fetch("/api/admin/ocs/creation", {
@@ -543,11 +635,13 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       });
       const json = await response.json();
       if (!response.ok || !json.success) throw new Error(json.error?.message ?? "OCS creation failed.");
-      showToast("OCS creation completed successfully.", "success");
-      await loadOverview(false);
+      showToast(options.successMessage ?? "OCS creation completed successfully.", "success");
+      if (options.refresh !== false) await loadOverview(false);
+      return json.data as Record<string, unknown>;
     } catch (error) {
       const message = error instanceof Error ? error.message : "OCS creation failed.";
       showToast(message, "error");
+      return null;
     } finally {
       setSubmittingAction("");
     }
@@ -641,40 +735,107 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
 
       {activeTab === "assign" ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          <PanelCard title="Assign Prepaid Package" description="Generate affectPackageToSubscriber using documented subscriber identifiers." className="xl:col-span-5">
+          <PanelCard title="Create Package With Account" description="Uses documented OCS 3.1.7 affectPackageToSubscriber with accountForSubs." className="xl:col-span-5">
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Package template ID" value={packageTemplateId} onChange={setPackageTemplateId} placeholder="553" />
-              <label className="block">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Subscriber identifier</span>
-                <select value={identifierType} onChange={(event) => setIdentifierType(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10">
-                  {["subscriberId", "imsi", "iccid", "msisdn", "multiImsi", "activationCode", "accountForSubs"].map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              {identifierType === "accountForSubs" ? (
-                <label className="block">
-                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Account ID</span>
+              <div className="md:col-span-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Package template</span>
+                <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_240px]">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                    <input
+                      value={packageTemplateSearch}
+                      onChange={(event) => setPackageTemplateSearch(event.target.value)}
+                      placeholder="Search package ID, name, data..."
+                      className="h-10 w-full rounded-md border border-border bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    />
+                  </div>
                   <select
-                    value={selectedAccountId}
-                    onChange={(event) => setSelectedAccountId(event.target.value)}
-                    className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    value={packageTemplateId}
+                    onChange={(event) => {
+                      setPackageTemplateId(event.target.value);
+                      const selected = packageTemplates.find((template) => String(templateId(template)) === event.target.value);
+                      if (selected?.perioddays) setValidityPeriod(String(selected.perioddays));
+                    }}
+                    className="h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
                   >
-                    <option value="">Select account</option>
-                    {selectedResellerAccounts.map((account) => (
-                      <option key={String(account.id)} value={String(account.id)}>
-                        {account.name ?? "Account"} #{String(account.id)} - {formatBalance(account.balance)}
+                    <option value="">Select package</option>
+                    {filteredPackageTemplates.map((template) => (
+                      <option key={String(templateId(template))} value={String(templateId(template))}>
+                        #{String(templateId(template))} - {templateDisplayName(template)} - {templateData(template)}
                       </option>
                     ))}
                   </select>
-                </label>
-              ) : (
-                <Field label="Identifier value" value={identifier} onChange={setIdentifier} placeholder="1000" />
-              )}
-              <Field label="Validity period days" value={validityPeriod} onChange={setValidityPeriod} placeholder="Optional override" />
-              <Field label="Active start" value={activeStart} onChange={setActiveStart} type="datetime-local" />
-              <Field label="Active end" value={activeEnd} onChange={setActiveEnd} type="datetime-local" />
+                </div>
+              </div>
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Account ID</span>
+                <select
+                  value={selectedAccountId}
+                  onChange={(event) => setSelectedAccountId(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                >
+                  <option value="">Select account</option>
+                  {selectedResellerAccounts.map((account) => (
+                    <option key={String(account.id)} value={String(account.id)}>
+                      #{String(account.id)} - {account.name ?? "Account"} - {formatBalance(account.balance)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Field label="Validity period days" value={validityPeriod} onChange={setValidityPeriod} placeholder="30" />
+              <Button type="button" onClick={createAccountPackage} disabled={submittingAction === "affectPackageToSubscriber"} className="md:col-span-2">
+                <Send className="h-4 w-4" />
+                {submittingAction === "affectPackageToSubscriber" ? "Creating package..." : "Create package with account"}
+              </Button>
             </div>
           </PanelCard>
-          <div className="xl:col-span-7"><CommandPreview command={packageAssignmentCommand} onQrText={setQrInput} /></div>
+          <div className="space-y-4 xl:col-span-7">
+            <CommandPreview command={packageAssignmentCommand} onQrText={setQrInput} />
+            {createdAccountPackage ? (
+              <section className="grid gap-4 rounded-lg border border-lime-200 bg-lime-50 p-4 shadow-sm lg:grid-cols-[220px_1fr]">
+                <div className="rounded-lg border border-border bg-white p-3 text-center">
+                  <div className="mx-auto grid h-44 w-44 place-items-center rounded-md bg-slate-50">
+                    {createdPackageQrUrl ? (
+                      <Image src={createdPackageQrUrl} alt="Created package QR code" width={176} height={176} unoptimized className="h-full w-full object-contain" />
+                    ) : (
+                      <QrCode className="h-12 w-12 text-slate-300" />
+                    )}
+                  </div>
+                  {createdPackageQrUrl ? (
+                    <a href={createdPackageQrUrl} download="internetkudo-created-package-qr.png" className="mt-3 inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 text-xs font-bold text-white">
+                      <Download className="h-4 w-4" />
+                      Download QR
+                    </a>
+                  ) : null}
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-green-700" />
+                    <h3 className="text-sm font-bold text-slate-950">Package created in OCS</h3>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-green-700 ring-1 ring-lime-200">status OK</span>
+                  </div>
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                    {[
+                      { label: "Account ID", value: createdAccountPackage.account?.id ?? selectedAccountId },
+                      { label: "Account name", value: createdAccountPackage.account?.name ?? "n/a" },
+                      { label: "Package template ID", value: createdAccountPackage.template ? templateId(createdAccountPackage.template) : packageTemplateId },
+                      { label: "Package name", value: createdAccountPackage.template ? templateDisplayName(createdAccountPackage.template) : "n/a" },
+                      { label: "Data allowance", value: createdAccountPackage.template ? templateData(createdAccountPackage.template) : "n/a" },
+                      { label: "Validity", value: `${validityPeriod || "n/a"} days` },
+                      { label: "Cost", value: createdAccountPackage.template?.cost ?? "n/a" },
+                      { label: "Created", value: new Date(createdAccountPackage.createdAt).toLocaleString() },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-md border border-border bg-white px-3 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
+                        <div className="mt-1 break-words text-sm font-semibold text-slate-900">{String(item.value)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">{jsonString(createdAccountPackage.response)}</pre>
+                </div>
+              </section>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

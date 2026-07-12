@@ -81,6 +81,14 @@ export function createPrepaidPackageTemplateCommand(input: {
   return ocsCommand("createPrepaidPackageTemplate", input);
 }
 
+export function affectPackageToSubscriberCommand(input: {
+  packageTemplateId: number;
+  accountForSubs: number;
+  validityPeriod?: number;
+}) {
+  return ocsCommand("affectPackageToSubscriber", input);
+}
+
 export function moveSubscriberRangeToAccountCommand(input: {
   rangeType: "IMSI" | "ICCID";
   rangeStart: string;
