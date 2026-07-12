@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { KeyRound, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { showToast } from "@/lib/toastify";
 
@@ -107,8 +108,22 @@ export function AdminAccountManager() {
             <span>Last login</span>
           </div>
           <div className="max-h-80 overflow-auto">
-            {users.length === 0 ? (
-              <div className="p-4 text-sm text-slate-500">{loading ? "Loading admin accounts..." : "No admin accounts found."}</div>
+            {loading && users.length === 0 ? (
+              <div className="space-y-3 p-3">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="grid grid-cols-[1.1fr_0.8fr_0.7fr_0.8fr] items-center gap-3 rounded-md border border-slate-100 px-3 py-3">
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-44" />
+                    </div>
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                    <Skeleton className="h-4 w-28" />
+                  </div>
+                ))}
+              </div>
+            ) : users.length === 0 ? (
+              <div className="p-4 text-sm text-slate-500">No admin accounts found.</div>
             ) : (
               users.map((user) => (
                 <div key={user.id} className="grid grid-cols-[1.1fr_0.8fr_0.7fr_0.8fr] items-center gap-3 border-b border-border px-3 py-3 text-sm last:border-0">
@@ -159,4 +174,3 @@ export function AdminAccountManager() {
     </section>
   );
 }
-

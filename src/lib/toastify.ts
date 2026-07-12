@@ -18,8 +18,9 @@ export function showToast(message: string, tone: ToastTone = "info") {
     text: message,
     duration: tone === "error" ? 6500 : 3600,
     close: true,
+    className: "internetkudo-toast-popup",
     gravity: "top",
-    position: "right",
+    position: "center",
     stopOnFocus: true,
     escapeMarkup: true,
     style: {

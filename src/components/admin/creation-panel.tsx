@@ -20,6 +20,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { buildOcsCommand, ocsCommandCatalog, ocsCommandGroups, type OcsCommandSafety } from "@/lib/ocs/catalog";
 import { bytesToHuman } from "@/lib/bytes/format";
 import { showToast } from "@/lib/toastify";
@@ -243,12 +244,14 @@ function InventoryList({
   idKey,
   nameKey,
   empty,
+  loading = false,
 }: {
   title: string;
   rows: Record<string, unknown>[];
   idKey: string;
   nameKey: string;
   empty: string;
+  loading?: boolean;
 }) {
   return (
     <section className="rounded-lg border border-border bg-white shadow-sm">
@@ -257,7 +260,19 @@ function InventoryList({
         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{rows.length}</span>
       </div>
       <div className="max-h-72 overflow-auto p-2">
-        {rows.length === 0 ? (
+        {loading && rows.length === 0 ? (
+          <div className="space-y-2 p-1">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="rounded-md px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Skeleton className="h-4 w-36" />
+                  <Skeleton className="h-3 w-14" />
+                </div>
+                <Skeleton className="mt-2 h-3 w-28" />
+              </div>
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
           <div className="rounded-md bg-slate-50 p-3 text-sm text-slate-500">{empty}</div>
         ) : (
           rows.slice(0, 30).map((row, index) => (
@@ -281,10 +296,12 @@ function ResellerBalanceList({
   resellers,
   selectedResellerId,
   onSelect,
+  loading = false,
 }: {
   resellers: ResellerWithAccounts[];
   selectedResellerId: string;
   onSelect: (id: string) => void;
+  loading?: boolean;
 }) {
   return (
     <section className="rounded-lg border border-border bg-white shadow-sm xl:col-span-4">
@@ -307,7 +324,26 @@ function ResellerBalanceList({
         </select>
       </div>
       <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-        {resellers.length === 0 ? (
+        {loading && resellers.length === 0 ? (
+          Array.from({ length: 3 }).map((_, index) => (
+            <article key={index} className="rounded-lg border border-border bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-4 w-20" />
+                </div>
+              </div>
+              <div className="mt-4 space-y-2">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            </article>
+          ))
+        ) : resellers.length === 0 ? (
           <div className="rounded-md bg-slate-50 p-3 text-sm text-slate-500">No reseller accounts loaded yet.</div>
         ) : (
           resellers.map((reseller) => {
@@ -731,18 +767,18 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-border bg-white p-4 shadow-sm">
             <div className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-950">{value}</div>
-            <div className="mt-1 text-xs text-slate-500">{overview ? `${overview.mode.toUpperCase()} OCS` : "Not loaded"}</div>
+            {loadingOverview && !overview ? <Skeleton className="mt-3 h-8 w-16" /> : <div className="mt-2 text-2xl font-bold text-slate-950">{value}</div>}
+            {loadingOverview && !overview ? <Skeleton className="mt-2 h-3 w-20" /> : <div className="mt-1 text-xs text-slate-500">{overview ? `${overview.mode.toUpperCase()} OCS` : "Not loaded"}</div>}
           </div>
         ))}
       </section>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-        <ResellerBalanceList resellers={resellers} selectedResellerId={selectedResellerId} onSelect={changeSelectedReseller} />
-        <InventoryList title="Network Profiles" rows={networkProfiles} idKey="id" nameKey="name" empty="No network profiles loaded yet." />
-        <InventoryList title="Location Zones" rows={locationZones} idKey="zoneId" nameKey="zoneName" empty="No location zones loaded yet." />
-        <InventoryList title="Destination Lists" rows={destinationLists} idKey="listId" nameKey="listName" empty="No destination lists loaded yet." />
-        <InventoryList title="Package Templates" rows={packageTemplates} idKey="prepaidpackagetemplateid" nameKey="prepaidpackagetemplatename" empty="No package templates loaded yet." />
+        <ResellerBalanceList resellers={resellers} selectedResellerId={selectedResellerId} onSelect={changeSelectedReseller} loading={loadingOverview} />
+        <InventoryList title="Network Profiles" rows={networkProfiles} idKey="id" nameKey="name" empty="No network profiles loaded yet." loading={loadingOverview} />
+        <InventoryList title="Location Zones" rows={locationZones} idKey="zoneId" nameKey="zoneName" empty="No location zones loaded yet." loading={loadingOverview} />
+        <InventoryList title="Destination Lists" rows={destinationLists} idKey="listId" nameKey="listName" empty="No destination lists loaded yet." loading={loadingOverview} />
+        <InventoryList title="Package Templates" rows={packageTemplates} idKey="prepaidpackagetemplateid" nameKey="prepaidpackagetemplatename" empty="No package templates loaded yet." loading={loadingOverview} />
       </div>
 
       <div className="flex gap-2 overflow-x-auto rounded-lg border border-border bg-white p-2 shadow-sm">

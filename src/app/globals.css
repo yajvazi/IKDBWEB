@@ -131,3 +131,19 @@
     @apply font-sans;
   }
 }
+
+.toastify.internetkudo-toast-popup {
+  position: fixed !important;
+  inset: auto !important;
+  left: 50% !important;
+  top: 50% !important;
+  width: min(420px, calc(100vw - 32px)) !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 99999 !important;
+  text-align: center;
+}
+
+.toastify.internetkudo-toast-popup .toast-close {
+  margin-left: 12px;
+  opacity: 0.72;
+}
