@@ -15,6 +15,21 @@ type Endpoint = {
 };
 
 const endpoints: Endpoint[] = [
+  { group: "Website", method: "GET", path: "/api/v1/health", summary: "Gateway health check", safeTry: true },
+  { group: "Website", method: "GET", path: "/api/v1/system-status", summary: "Website system status", safeTry: true },
+  { group: "Website", method: "GET", path: "/api/v1/public-packages", summary: "Website public package catalog", safeTry: true },
+  { group: "Website", method: "GET", path: "/api/v1/packages/list", summary: "Website package list compatibility", safeTry: true },
+  { group: "Website", method: "GET", path: "/api/v1/categories", summary: "Website categories", safeTry: true },
+  { group: "Website", method: "GET", path: "/api/v1/byop/operators", summary: "Website BYOP operators", safeTry: true },
+  { group: "Website", method: "POST", path: "/api/v1/byop/quote", summary: "Website BYOP quote", safeTry: true, body: { tadigs: ["TURKC"], dataGb: 5, perioddays: 30 } },
+  { group: "Website", method: "POST", path: "/api/v1/create-payment-intent", summary: "Website Stripe payment intent", safeTry: false, body: { packageId: "pkg_1657099", price: "30.99", currency: "EUR" } },
+  { group: "Website", method: "POST", path: "/api/v1/orders/complete", summary: "Website complete paid order and provision eSIM", safeTry: false, body: { paymentIntentId: "pi_mock_website", packageId: 553, packageTemplateId: 553, email: "customer@example.com", customerName: "Customer", name: "Turkey 10 GB", validityDays: 30 } },
+  { group: "Website", method: "POST", path: "/api/v1/orders/cod", summary: "Website COD order", safeTry: true, body: { orderId: "cod_demo", customerName: "Customer", customerEmail: "customer@example.com", customerPhone: "+38344111222", shippingAddress: "Street 1", packageName: "Turkey 10 GB", totalPrice: 20 } },
+  { group: "Website", method: "POST", path: "/api/v1/iccid/check", summary: "Website ICCID balance check", safeTry: true, body: { iccid: "8948010000074618117" } },
+  { group: "Website", method: "POST", path: "/api/v1/iccid/topup", summary: "Website ICCID top-up", safeTry: false, body: { iccid: "8948010000074618117", packageTemplateId: 553, packageName: "Top-up 10 GB", paymentIntentId: "pi_mock_website" } },
+  { group: "Website", method: "POST", path: "/api/v1/newsletter", summary: "Website newsletter signup", safeTry: true, body: { email: "customer@example.com", source: "website" } },
+  { group: "Website", method: "POST", path: "/api/v1/newsletter/unsubscribe", summary: "Website newsletter unsubscribe", safeTry: true, body: { email: "customer@example.com" } },
+  { group: "Website", method: "POST", path: "/api/v1/support/ticket", summary: "Website support ticket", safeTry: true, body: { name: "Customer", email: "customer@example.com", message: "I need help with my eSIM." } },
   { group: "Mobile App", method: "GET", path: "/api/v1/app/bootstrap", summary: "Load app configuration and feature flags", safeTry: true },
   { group: "Mobile App", method: "GET", path: "/api/v1/app/onboarding", summary: "Load onboarding slides", safeTry: true },
   { group: "Mobile App", method: "GET", path: "/api/v1/app/home", summary: "Load home screen content", safeTry: true },
@@ -89,8 +104,8 @@ const groups = Array.from(new Set(endpoints.map((endpoint) => endpoint.group)));
 
 export default function ApiDocsPage() {
   const [query, setQuery] = useState("");
-  const [activeGroup, setActiveGroup] = useState("Mobile App");
-  const [selectedPath, setSelectedPath] = useState("/api/v1/app/bootstrap");
+  const [activeGroup, setActiveGroup] = useState("Website");
+  const [selectedPath, setSelectedPath] = useState("/api/v1/public-packages");
   const [token, setToken] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [response, setResponse] = useState("");

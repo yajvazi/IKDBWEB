@@ -83,8 +83,20 @@ export function createPrepaidPackageTemplateCommand(input: {
 
 export function affectPackageToSubscriberCommand(input: {
   packageTemplateId: number;
-  accountForSubs: number;
+  accountForSubs?: number;
+  subscriber?: {
+    subscriberId?: number;
+    imsi?: string;
+    iccid?: string;
+    msisdn?: string;
+    multiImsi?: string;
+    activationCode?: string;
+  };
   validityPeriod?: number;
+  activePeriod?: {
+    start?: string;
+    end?: string;
+  };
 }) {
   return ocsCommand("affectPackageToSubscriber", input);
 }

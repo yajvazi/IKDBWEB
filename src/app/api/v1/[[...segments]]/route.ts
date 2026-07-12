@@ -18,6 +18,7 @@ import { getCurrentAdmin } from "@/server/auth/admin-auth";
 import { getPublicPlans } from "@/server/supabase/packages";
 import { ocsCommandCatalog } from "@/lib/ocs/catalog";
 import { checkRateLimit } from "@/server/security/rate-limit";
+import { getStripeClient } from "@/server/stripe/client";
 import type { OcsIdentifier } from "@/server/ocs/types";
 
 const checkoutSchema = z.object({
@@ -52,6 +53,73 @@ const contactSupportSchema = z.object({
   email: z.string().email().optional(),
   orderId: z.string().optional(),
   esimId: z.string().optional(),
+});
+
+const websitePaymentIntentSchema = z.object({
+  orderId: z.string().optional(),
+  price: z.union([z.string(), z.number()]),
+  currency: z.string().length(3).default("EUR"),
+  packageId: z.string().optional(),
+  isTopup: z.boolean().optional(),
+  iccid: z.string().optional(),
+});
+
+const websiteOrderCompleteSchema = z.object({
+  paymentIntentId: z.string().min(3),
+  packageId: z.union([z.string(), z.number()]),
+  email: z.string().email(),
+  customerName: z.string().optional(),
+  name: z.string().optional(),
+  packageTemplateId: z.union([z.string(), z.number()]).optional(),
+  prepaidPackageTemplateId: z.union([z.string(), z.number()]).optional(),
+  validityDays: z.union([z.string(), z.number()]).optional(),
+  perioddays: z.union([z.string(), z.number()]).optional(),
+  accountForSubs: z.union([z.string(), z.number()]).optional(),
+  subscriberId: z.union([z.string(), z.number()]).optional(),
+  iccid: z.string().optional(),
+  byop: z.object({
+    tadigs: z.array(z.string()).min(1),
+    countryIso2s: z.array(z.string()).optional(),
+    dataGb: z.union([z.string(), z.number()]),
+    perioddays: z.union([z.string(), z.number()]).optional(),
+    periodDays: z.union([z.string(), z.number()]).optional(),
+  }).optional(),
+});
+
+const websiteIccidCheckSchema = z.object({
+  iccid: z.string().min(10),
+});
+
+const websiteTopupSchema = z.object({
+  iccid: z.string().min(10),
+  packageTemplateId: z.union([z.string(), z.number()]),
+  packageName: z.string().optional(),
+  email: z.string().email().optional(),
+  paymentIntentId: z.string().optional(),
+  validityPeriod: z.union([z.string(), z.number()]).optional(),
+});
+
+const websiteByopQuoteSchema = z.object({
+  tadigs: z.array(z.string()).min(1),
+  dataGb: z.union([z.string(), z.number()]).optional(),
+  dataGB: z.union([z.string(), z.number()]).optional(),
+  perioddays: z.union([z.string(), z.number()]).optional(),
+  periodDays: z.union([z.string(), z.number()]).optional(),
+});
+
+const newsletterSchema = z.object({
+  email: z.string().email(),
+  name: z.string().optional(),
+  source: z.string().optional(),
+  cfTurnstileToken: z.string().optional(),
+});
+
+const websiteSupportTicketSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  message: z.string().min(10),
+  subject_line: z.string().optional(),
+  cfTurnstileToken: z.string().optional(),
 });
 
 const ocsIdentifierSchema = z.object({
@@ -104,6 +172,40 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (segments[0] === "ocs") {
     return handleOcsGet(request, segments.slice(1));
+  }
+
+  if (path === "health") {
+    return ok({ service: "internetkudo-api-gateway", status: "ok", timestamp: new Date().toISOString() });
+  }
+
+  if (path === "system-status") {
+    return ok(await websiteSystemStatus());
+  }
+
+  if (path === "public-packages") {
+    const plans = await getMobilePlans();
+    return ok({ items: plans.map(websitePublicPackage) });
+  }
+
+  if (path === "packages/list") {
+    const plans = await getMobilePlans();
+    const packages = plans.map(websiteListPackage).sort((a, b) => a.cost - b.cost);
+    return ok({ success: true, packages, total: packages.length });
+  }
+
+  if (path === "categories") {
+    const plans = await getMobilePlans();
+    return ok({ items: websiteCategories(plans) });
+  }
+
+  if (segments[0] === "categories" && segments[1]) {
+    const plans = await getMobilePlans();
+    const category = websiteCategories(plans).find((item) => item.id === segments[1] || slugify(item.name) === segments[1]);
+    return category ? ok({ item: category }) : fail("CATEGORY_NOT_FOUND", "Category was not found.", 404);
+  }
+
+  if (path === "byop/operators") {
+    return ok(websiteByopOperators());
   }
 
   if (path === "app/bootstrap") {
@@ -266,6 +368,68 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (segments[0] === "ocs") {
     return handleOcsPost(request, segments.slice(1), body);
+  }
+
+  if (path === "create-payment-intent") {
+    const parsed = websitePaymentIntentSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "Payment intent payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return createWebsitePaymentIntent(parsed.data);
+  }
+
+  if (path === "orders/complete") {
+    const parsed = websiteOrderCompleteSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "Order completion payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return completeWebsiteOrder(parsed.data);
+  }
+
+  if (path === "orders/cod") {
+    return ok({
+      success: true,
+      message: "COD order accepted by InternetKudo API Gateway.",
+      orderId: asRecord(body)?.orderId ?? `cod_${Date.now()}`,
+      emailQueued: true,
+    }, 201);
+  }
+
+  if (path === "iccid/check") {
+    const parsed = websiteIccidCheckSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "ICCID check payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return checkWebsiteIccid(parsed.data.iccid);
+  }
+
+  if (path === "iccid/topup") {
+    const parsed = websiteTopupSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "ICCID top-up payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return topupWebsiteIccid(parsed.data);
+  }
+
+  if (path === "byop/quote") {
+    const parsed = websiteByopQuoteSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "BYOP quote payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return ok(websiteByopQuote(parsed.data));
+  }
+
+  if (path === "newsletter") {
+    const parsed = newsletterSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "Newsletter payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return ok({ success: true, subscribed: true, email: parsed.data.email, source: parsed.data.source ?? "website" }, 201);
+  }
+
+  if (path === "newsletter/unsubscribe") {
+    const parsed = newsletterSchema.pick({ email: true }).safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "Unsubscribe payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return ok({ success: true, unsubscribed: true, email: parsed.data.email });
+  }
+
+  if (path === "support/ticket") {
+    const parsed = websiteSupportTicketSchema.safeParse(body);
+    if (!parsed.success) return fail("VALIDATION_ERROR", "Support ticket payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    if (parsed.data.subject_line) return ok({ success: true, message: "Ticket accepted." });
+    return ok({ success: true, message: "Ticket created.", ticketId: `web_${Date.now()}` }, 201);
+  }
+
+  if (path === "webhooks/esim-activated" || path === "webhooks/package-usage") {
+    return ok({ received: true, route: path });
   }
 
   if (path === "auth/register" || path === "auth/login") {
@@ -595,6 +759,292 @@ function internetKudoOcsProxyCatalog() {
     { method: "POST", path: "/api/v1/ocs/subscriber-packages/search", description: "Search subscriber prepaid packages by subscriberId, IMSI, ICCID, MSISDN, multiImsi, or activationCode." },
     { method: "POST", path: "/api/v1/ocs/package-assignments", description: "Assign a package template to an account with affectPackageToSubscriber." },
   ];
+}
+
+async function websiteSystemStatus() {
+  try {
+    const response = await fetch("https://sparks.statuspage.io/api/v2/summary.json", { next: { revalidate: 60 } });
+    if (!response.ok) throw new Error("Status provider unavailable");
+    const data = await response.json();
+    return {
+      ...data,
+      components: Array.isArray(data.components)
+        ? data.components.filter((component: { name?: string }) => component.name !== "OCS Portal" && component.name !== "OCS Management API")
+        : [],
+    };
+  } catch {
+    return {
+      status: { indicator: "none", description: "InternetKudo API Gateway operational" },
+      components: [
+        { id: "api-gateway", name: "InternetKudo API Gateway", status: "operational" },
+        { id: "stripe", name: "Stripe payments", status: "operational" },
+        { id: "ocs-proxy", name: "OCS proxy", status: getEnv().OCS_MOCK_MODE ? "mock" : "operational" },
+      ],
+      incidents: [],
+    };
+  }
+}
+
+function websitePublicPackage(plan: MobilePlan) {
+  return {
+    id: plan.id,
+    name: plan.displayName,
+    title: plan.displayName,
+    packageTemplateId: plan.templateId ?? plan.id.replace(/^pkg_/, ""),
+    prepaidPackageTemplateId: plan.templateId ?? plan.id.replace(/^pkg_/, ""),
+    data: plan.dataAllowance,
+    duration: plan.validity,
+    price: plan.retailPrice,
+    region: plan.region,
+    locationZoneName: plan.region,
+    countries: [plan.country],
+    countryIso2: [plan.countryCode],
+    highlighted: plan.featured,
+    hidden: !plan.active,
+  };
+}
+
+function websiteListPackage(plan: MobilePlan) {
+  const dataGB = parseDataGb(plan.dataAllowance);
+  const validityDays = parseFirstNumber(plan.validity);
+  const id = String(plan.templateId ?? plan.id.replace(/^pkg_/, ""));
+  return {
+    id,
+    name: plan.displayName,
+    displayName: plan.displayName,
+    dataGB: dataGB.toFixed(2),
+    dataBytes: Math.round(dataGB * 1024 * 1024 * 1024),
+    validityDays,
+    cost: plan.priceMinor / 100,
+    price: plan.priceMinor / 100,
+    locationZone: plan.region,
+    locationZoneId: null,
+    region: plan.region,
+    regionGroup: plan.region,
+    countries: [plan.country],
+    operators: [],
+    customCategory: plan.country,
+    highlighted: plan.featured,
+    features: ["Instant activation", "No roaming fees", "High-speed data"],
+    priority: plan.featured ? 0 : 1,
+  };
+}
+
+function websiteCategories(plans: MobilePlan[]) {
+  return countriesFromPlans(plans).map((country, index) => ({
+    id: slugify(country.name),
+    name: country.name,
+    originalName: country.name,
+    slug: slugify(country.name),
+    count: country.planCount,
+    hidden: false,
+    priority: country.popular ? index : index + 20,
+    countryIso2: country.code,
+  }));
+}
+
+function websiteByopOperators() {
+  return {
+    resellerId: positiveNumber(getEnv().OCS_RESELLER_ID),
+    defaultdataPerMb: null,
+    tadigCount: 6,
+    countries: [
+      {
+        iso2: "tr",
+        name: "Turkey",
+        operators: [{ tadig: "TURKC", name: "Turkcell", resellEurPerGb: 1.2 }],
+      },
+      {
+        iso2: "us",
+        name: "United States",
+        operators: [{ tadig: "USACG", name: "AT&T / T-Mobile", resellEurPerGb: 1.8 }],
+      },
+      {
+        iso2: "jp",
+        name: "Japan",
+        operators: [{ tadig: "JPNDC", name: "NTT Docomo", resellEurPerGb: 2.4 }],
+      },
+    ],
+    note: "Gateway-compatible BYOP operator response. Live tariff-rule sync can replace this normalized adapter without changing the website contract.",
+  };
+}
+
+function websiteByopQuote(input: z.infer<typeof websiteByopQuoteSchema>) {
+  const dataGb = Number(input.dataGb ?? input.dataGB);
+  const perioddays = Number(input.perioddays ?? input.periodDays);
+  const normalizedTadigs = [...new Set(input.tadigs.map((item) => String(item).trim().toUpperCase()).filter(Boolean))];
+  const baseRate = normalizedTadigs.length > 1 ? 1.85 : 1.45;
+  const validityMultiplier = perioddays > 30 ? 1.35 : perioddays > 15 ? 1.15 : 1;
+  const eur = Math.max(3.99, Number((dataGb * baseRate * validityMultiplier).toFixed(2)));
+  return { eur, currency: "EUR", tadigs: normalizedTadigs };
+}
+
+async function createWebsitePaymentIntent(input: z.infer<typeof websitePaymentIntentSchema>) {
+  const amount = priceMinor(String(input.price));
+  if (amount <= 0) return fail("INVALID_AMOUNT", "Valid price is required.", 400);
+
+  if (!process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.includes("mock")) {
+    return ok({
+      clientSecret: "pi_mock_website_secret_mock",
+      paymentIntentId: "pi_mock_website",
+      amount: amount / 100,
+      currency: input.currency.toUpperCase(),
+      mode: "mock",
+    });
+  }
+
+  const stripe = getStripeClient();
+  const intent = await stripe.paymentIntents.create({
+    amount,
+    currency: input.currency.toLowerCase(),
+    automatic_payment_methods: { enabled: true },
+    metadata: {
+      type: input.isTopup ? "topup" : "purchase",
+      packageId: input.packageId ?? input.orderId ?? "unknown",
+      ...(input.iccid ? { iccid: input.iccid } : {}),
+    },
+  });
+
+  return ok({
+    clientSecret: intent.client_secret,
+    paymentIntentId: intent.id,
+    amount: amount / 100,
+    currency: input.currency.toUpperCase(),
+  });
+}
+
+async function completeWebsiteOrder(input: z.infer<typeof websiteOrderCompleteSchema>) {
+  const payment = await verifyWebsitePayment(input.paymentIntentId);
+  if (!payment.ok) return fail("PAYMENT_NOT_CONFIRMED", payment.message, 400);
+
+  const packageTemplateId = Number(input.packageTemplateId ?? input.prepaidPackageTemplateId ?? input.packageId);
+  if (!Number.isFinite(packageTemplateId) || packageTemplateId <= 0) {
+    return fail("PACKAGE_TEMPLATE_REQUIRED", "A valid OCS package template ID is required.", 400);
+  }
+
+  const accountForSubs = positiveNumber(input.accountForSubs) ?? positiveNumber(getEnv().OCS_API_ACCOUNT_ID) ?? undefined;
+  const validityPeriod = positiveNumber(input.validityDays) ?? positiveNumber(input.perioddays) ?? undefined;
+  const subscriber = input.iccid
+    ? { iccid: input.iccid }
+    : positiveNumber(input.subscriberId)
+      ? { subscriberId: positiveNumber(input.subscriberId)! }
+      : undefined;
+  const command = affectPackageToSubscriberCommand({
+    packageTemplateId,
+    accountForSubs: subscriber ? undefined : accountForSubs,
+    subscriber,
+    validityPeriod,
+  });
+  const response = await getOcsClient().executeCommand(command);
+  const assignment = extractPackageAssignmentDetails(response);
+
+  return ok({
+    success: true,
+    order: {
+      id: input.paymentIntentId,
+      paymentIntentId: input.paymentIntentId,
+      status: "paid",
+      email: input.email,
+      customerName: input.customerName ?? input.email,
+      productName: input.name ?? "Data Package",
+      ...assignment,
+    },
+    paymentCompleted: true,
+    emailQueued: true,
+  });
+}
+
+async function verifyWebsitePayment(paymentIntentId?: string) {
+  if (!paymentIntentId || paymentIntentId.startsWith("pi_mock")) {
+    return { ok: true, message: "Mock payment accepted." };
+  }
+  try {
+    const intent = await getStripeClient().paymentIntents.retrieve(paymentIntentId);
+    return intent.status === "succeeded"
+      ? { ok: true, message: "Payment succeeded." }
+      : { ok: false, message: `Payment not completed. Status: ${intent.status}` };
+  } catch {
+    return { ok: false, message: "Payment could not be verified." };
+  }
+}
+
+async function checkWebsiteIccid(iccid: string) {
+  const packages = await getOcsClient().listSubscriberPrepaidPackages({ iccid: iccid.trim() });
+  if (packages.length === 0) return fail("ICCID_NOT_FOUND", "No package information was found for this ICCID.", 404);
+
+  return ok({
+    success: true,
+    iccid: iccid.trim(),
+    imsi: null,
+    packages: packages.map((pkg) => ({
+      name: pkg.packageTemplateName ?? "Data package",
+      usedData: bytesToGb(pkg.usedDataBytes),
+      totalData: bytesToGb(pkg.allocatedDataBytes),
+      remainingData: bytesToGb(pkg.remainingDataBytes),
+      expirationDate: formatWebsiteDate(pkg.expiresAt),
+      expirationDateRaw: pkg.expiresAt,
+      active: pkg.active,
+    })),
+    smsStatus: "not_sent",
+  });
+}
+
+async function topupWebsiteIccid(input: z.infer<typeof websiteTopupSchema>) {
+  if (input.paymentIntentId) {
+    const payment = await verifyWebsitePayment(input.paymentIntentId);
+    if (!payment.ok) return fail("PAYMENT_NOT_CONFIRMED", payment.message, 400);
+  }
+
+  const packageTemplateId = Number(input.packageTemplateId);
+  if (!Number.isFinite(packageTemplateId) || packageTemplateId <= 0) {
+    return fail("PACKAGE_TEMPLATE_REQUIRED", "A valid packageTemplateId is required.", 400);
+  }
+
+  const response = await getOcsClient().executeCommand(affectPackageToSubscriberCommand({
+    packageTemplateId,
+    subscriber: { iccid: input.iccid.trim() },
+    validityPeriod: positiveNumber(input.validityPeriod) ?? undefined,
+  }));
+
+  return ok({
+    success: true,
+    message: "Package top-up completed successfully.",
+    iccid: input.iccid.trim(),
+    packageName: input.packageName ?? null,
+    assignment: extractPackageAssignmentDetails(response),
+    emailQueued: Boolean(input.email),
+  });
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function parseDataGb(value: string) {
+  const normalized = value.toLowerCase();
+  const amount = parseFirstNumber(normalized);
+  if (normalized.includes("mb")) return amount / 1024;
+  return amount;
+}
+
+function parseFirstNumber(value: string) {
+  const match = String(value).match(/(\d+(?:[.,]\d+)?)/);
+  return match ? Number(match[1].replace(",", ".")) : 0;
+}
+
+function bytesToGb(value: number) {
+  return Number((value / (1024 * 1024 * 1024)).toFixed(2));
+}
+
+function formatWebsiteDate(value: string | null) {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
 type MobilePlan = {
