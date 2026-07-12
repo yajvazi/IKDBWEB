@@ -13,17 +13,23 @@ export function getOpenApiSpec() {
       { url: "/", description: "Admin gateway routes" },
     ],
     tags: [
+      "Mobile App",
       "Authentication",
+      "Profile",
       "Countries",
       "Plans",
+      "Search",
+      "Cart",
       "Checkout",
       "Orders",
       "eSIMs",
       "Top-ups",
+      "Payment Methods",
       "Notifications",
       "Wallet",
       "Referrals",
       "Support",
+      "Help Center",
       "Webhooks",
       "Admin",
       "OCS Gateway",
@@ -76,6 +82,25 @@ export function getOpenApiSpec() {
         Referral: { type: "object", properties: { code: { type: "string" }, status: { type: "string" } } },
         SupportTicket: { type: "object", properties: { id: { type: "string" }, subject: { type: "string" }, status: { type: "string" } } },
         Pagination: { type: "object", properties: { page: { type: "integer" }, pageSize: { type: "integer" }, total: { type: "integer" } } },
+        CartQuoteRequest: {
+          type: "object",
+          required: ["planId"],
+          properties: {
+            planId: { type: "string" },
+            quantity: { type: "integer", minimum: 1, default: 1 },
+            referralCode: { type: "string" },
+            kudoPointsToRedeem: { type: "integer", minimum: 0, default: 0 },
+          },
+        },
+        ProfileUpdateRequest: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            phone: { type: "string" },
+            marketingOptIn: { type: "boolean" },
+            preferredCurrency: { type: "string", minLength: 3, maxLength: 3 },
+          },
+        },
         OcsCommandName: {
           type: "string",
           enum: ocsCommandCatalog.map((item) => item.command),
@@ -175,17 +200,23 @@ export function getOpenApiSpec() {
       },
     },
     paths: {
+      "/app/bootstrap": get("Mobile App", "Load app configuration, feature flags, and navigation"),
+      "/app/onboarding": get("Mobile App", "Load onboarding slides"),
+      "/app/home": get("Mobile App", "Load home screen content"),
       "/auth/register": post("Authentication", "Register a customer"),
       "/auth/login": post("Authentication", "Login a customer"),
       "/auth/logout": post("Authentication", "Logout a customer"),
       "/auth/refresh": post("Authentication", "Refresh a session"),
       "/auth/forgot-password": post("Authentication", "Start password reset"),
       "/auth/me": get("Authentication", "Current customer"),
+      "/profile": { ...get("Profile", "Get customer profile"), ...patchWithBody("Profile", "Update customer profile", "#/components/schemas/ProfileUpdateRequest") },
       "/countries": get("Countries", "List supported countries"),
       "/countries/{countryCode}": get("Countries", "Get country details"),
       "/countries/{countryCode}/plans": get("Countries", "List country plans"),
       "/plans": get("Plans", "List sellable plans"),
       "/plans/{planId}": get("Plans", "Get plan details"),
+      "/search": get("Search", "Search countries and plans"),
+      "/cart/quote": { ...get("Cart", "Quote cart from query params"), ...postWithBody("Cart", "Quote cart", "#/components/schemas/CartQuoteRequest") },
       "/checkout/payment-intent": post("Checkout", "Create a Stripe PaymentIntent"),
       "/checkout/validate": post("Checkout", "Validate checkout state"),
       "/orders": { ...post("Orders", "Create an order"), ...get("Orders", "List customer orders") },
@@ -195,6 +226,10 @@ export function getOpenApiSpec() {
       "/esims/{esimId}/usage": get("eSIMs", "Get usage"),
       "/esims/{esimId}/installation": get("eSIMs", "Get masked installation details"),
       "/esims/{esimId}/topups": post("Top-ups", "Create a top-up order"),
+      "/payment-methods": get("Payment Methods", "List saved payment methods"),
+      "/payment-methods/setup-intent": post("Payment Methods", "Create a Stripe SetupIntent for adding a card"),
+      "/payment-methods/{paymentMethodId}": deleteOperation("Payment Methods", "Delete payment method"),
+      "/payment-methods/{paymentMethodId}/default": patch("Payment Methods", "Set default payment method"),
       "/notifications": get("Notifications", "List notifications"),
       "/notifications/{notificationId}/read": patch("Notifications", "Mark notification read"),
       "/notifications/read-all": post("Notifications", "Mark all notifications read"),
@@ -202,6 +237,9 @@ export function getOpenApiSpec() {
       "/wallet/transactions": get("Wallet", "List wallet transactions"),
       "/referrals": get("Referrals", "List referral activity"),
       "/referrals/apply": post("Referrals", "Apply a referral code"),
+      "/help/topics": get("Help Center", "List help topics"),
+      "/help/topics/{topicId}": get("Help Center", "Get help topic"),
+      "/support/contact": post("Support", "Contact support"),
       "/support/tickets": { ...post("Support", "Create support ticket"), ...get("Support", "List support tickets") },
       "/support/tickets/{ticketId}": get("Support", "Get support ticket"),
       "/ocs/health": get("OCS Gateway", "Check InternetKudo OCS proxy health"),
@@ -313,6 +351,18 @@ function patch(tag: string, summary: string) {
   return operation("patch", tag, summary);
 }
 
+function deleteOperation(tag: string, summary: string) {
+  return operation("delete", tag, summary);
+}
+
+function postWithBody(tag: string, summary: string, schemaRef: string) {
+  return operationWithBody("post", tag, summary, schemaRef);
+}
+
+function patchWithBody(tag: string, summary: string, schemaRef: string) {
+  return operationWithBody("patch", tag, summary, schemaRef);
+}
+
 function ocsResellerScopedGet(summary: string) {
   return {
     get: {
@@ -325,12 +375,27 @@ function ocsResellerScopedGet(summary: string) {
   };
 }
 
-function operation(method: "get" | "post" | "patch", tag: string, summary: string) {
+function operation(method: "get" | "post" | "patch" | "delete", tag: string, summary: string) {
   return {
     [method]: {
       tags: [tag],
       summary,
       security: [{ bearerAuth: [] }],
+      responses: openApiResponses(),
+    },
+  };
+}
+
+function operationWithBody(method: "post" | "patch", tag: string, summary: string, schemaRef: string) {
+  return {
+    [method]: {
+      tags: [tag],
+      summary,
+      security: [{ bearerAuth: [] }],
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: { $ref: schemaRef } } },
+      },
       responses: openApiResponses(),
     },
   };

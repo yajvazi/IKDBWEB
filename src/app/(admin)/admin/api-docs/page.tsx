@@ -7,7 +7,7 @@ import { showToast } from "@/lib/toastify";
 
 type Endpoint = {
   group: string;
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   summary: string;
   safeTry: boolean;
@@ -15,14 +15,34 @@ type Endpoint = {
 };
 
 const endpoints: Endpoint[] = [
+  { group: "Mobile App", method: "GET", path: "/api/v1/app/bootstrap", summary: "Load app configuration and feature flags", safeTry: true },
+  { group: "Mobile App", method: "GET", path: "/api/v1/app/onboarding", summary: "Load onboarding slides", safeTry: true },
+  { group: "Mobile App", method: "GET", path: "/api/v1/app/home", summary: "Load home screen content", safeTry: true },
   { group: "Authentication", method: "GET", path: "/api/v1/auth/me", summary: "Current customer", safeTry: true },
+  { group: "Profile", method: "GET", path: "/api/v1/profile", summary: "Get profile", safeTry: true },
+  { group: "Profile", method: "PATCH", path: "/api/v1/profile", summary: "Update profile", safeTry: true, body: { name: "Yil Alvazi", marketingOptIn: true, preferredCurrency: "EUR" } },
   { group: "Countries", method: "GET", path: "/api/v1/countries", summary: "List supported countries", safeTry: true },
+  { group: "Countries", method: "GET", path: "/api/v1/countries/TR", summary: "Get country detail", safeTry: true },
+  { group: "Countries", method: "GET", path: "/api/v1/countries/TR/plans", summary: "List country plans", safeTry: true },
   { group: "Plans", method: "GET", path: "/api/v1/plans", summary: "List sellable plans", safeTry: true },
+  { group: "Search", method: "GET", path: "/api/v1/search?q=Japan", summary: "Search countries and plans", safeTry: true },
+  { group: "Cart", method: "GET", path: "/api/v1/cart/quote?planId=pkg_1657099&quantity=1", summary: "Quote cart from query params", safeTry: true },
+  { group: "Cart", method: "POST", path: "/api/v1/cart/quote", summary: "Quote cart", safeTry: true, body: { planId: "pkg_1657099", quantity: 1, referralCode: "KUDO123", kudoPointsToRedeem: 0 } },
   { group: "Orders", method: "GET", path: "/api/v1/orders", summary: "List customer orders", safeTry: true },
+  { group: "Checkout", method: "POST", path: "/api/v1/checkout/payment-intent", summary: "Create Stripe PaymentSheet intent", safeTry: true, body: { planId: "pkg_1657099", quantity: 1, currency: "EUR" } },
   { group: "eSIMs", method: "GET", path: "/api/v1/esims", summary: "List customer eSIMs", safeTry: true },
+  { group: "eSIMs", method: "GET", path: "/api/v1/esims/esim_102/usage", summary: "Get eSIM usage", safeTry: true },
+  { group: "eSIMs", method: "GET", path: "/api/v1/esims/esim_102/installation", summary: "Get eSIM installation QR/manual data", safeTry: true },
+  { group: "Payment Methods", method: "GET", path: "/api/v1/payment-methods", summary: "List payment methods", safeTry: true },
+  { group: "Payment Methods", method: "POST", path: "/api/v1/payment-methods/setup-intent", summary: "Create card setup intent", safeTry: true, body: {} },
+  { group: "Payment Methods", method: "PATCH", path: "/api/v1/payment-methods/pm_card_4242/default", summary: "Set default payment method", safeTry: true, body: {} },
+  { group: "Payment Methods", method: "DELETE", path: "/api/v1/payment-methods/pm_card_8888", summary: "Delete payment method", safeTry: false },
   { group: "Notifications", method: "GET", path: "/api/v1/notifications", summary: "List notifications", safeTry: true },
   { group: "Wallet", method: "GET", path: "/api/v1/wallet", summary: "Get wallet", safeTry: true },
+  { group: "Referrals", method: "GET", path: "/api/v1/referrals", summary: "Get referral code and rewards", safeTry: true },
+  { group: "Help Center", method: "GET", path: "/api/v1/help/topics", summary: "List help topics", safeTry: true },
   { group: "Support", method: "GET", path: "/api/v1/support/tickets", summary: "List support tickets", safeTry: true },
+  { group: "Support", method: "POST", path: "/api/v1/support/contact", summary: "Contact support", safeTry: true, body: { topic: "Install eSIM", message: "I need help installing my eSIM.", email: "yil@example.com" } },
   { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/health", summary: "Check InternetKudo OCS proxy health", safeTry: true },
   { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/catalog", summary: "List supported proxy routes and documented OCS commands", safeTry: true },
   { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/reseller-accounts", summary: "List reseller accounts through the gateway", safeTry: true },
@@ -69,8 +89,8 @@ const groups = Array.from(new Set(endpoints.map((endpoint) => endpoint.group)));
 
 export default function ApiDocsPage() {
   const [query, setQuery] = useState("");
-  const [activeGroup, setActiveGroup] = useState("OCS Gateway");
-  const [selectedPath, setSelectedPath] = useState("/api/v1/ocs/catalog");
+  const [activeGroup, setActiveGroup] = useState("Mobile App");
+  const [selectedPath, setSelectedPath] = useState("/api/v1/app/bootstrap");
   const [token, setToken] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [response, setResponse] = useState("");
@@ -119,9 +139,9 @@ export default function ApiDocsPage() {
         method: selected.method,
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(selected.method !== "GET" ? { "content-type": "application/json" } : {}),
+          ...(selected.method !== "GET" && selected.method !== "DELETE" ? { "content-type": "application/json" } : {}),
         },
-        body: selected.method === "GET" ? undefined : requestBody,
+        body: selected.method === "GET" || selected.method === "DELETE" ? undefined : requestBody,
       });
       const json = await result.json();
       setResponse(JSON.stringify(json, null, 2));
@@ -237,11 +257,11 @@ export default function ApiDocsPage() {
 
 function codeSnippets(endpoint: Endpoint, body: string, token: string) {
   const auth = token ? `Authorization: Bearer ${token}` : "Authorization: Bearer <jwt>";
-  const bodyLine = endpoint.method === "GET" ? "" : ` \\\n  -H "content-type: application/json" \\\n  --data '${body.replaceAll("'", "'\\''")}'`;
+  const bodyLine = endpoint.method === "GET" || endpoint.method === "DELETE" ? "" : ` \\\n  -H "content-type: application/json" \\\n  --data '${body.replaceAll("'", "'\\''")}'`;
   return {
     cURL: `curl -X ${endpoint.method} \\\n  -H "${auth}"${bodyLine} \\\n  "${typeof window === "undefined" ? "" : window.location.origin}${endpoint.path}"`,
-    JavaScript: `const response = await fetch("${endpoint.path}", {\n  method: "${endpoint.method}",\n  headers: {\n    Authorization: "Bearer ${token || "<jwt>"}"${endpoint.method === "GET" ? "" : ',\n    "content-type": "application/json"'}\n  }${endpoint.method === "GET" ? "" : `,\n  body: JSON.stringify(${body || "{}"})`}\n});\nconst json = await response.json();`,
+    JavaScript: `const response = await fetch("${endpoint.path}", {\n  method: "${endpoint.method}",\n  headers: {\n    Authorization: "Bearer ${token || "<jwt>"}"${endpoint.method === "GET" || endpoint.method === "DELETE" ? "" : ',\n    "content-type": "application/json"'}\n  }${endpoint.method === "GET" || endpoint.method === "DELETE" ? "" : `,\n  body: JSON.stringify(${body || "{}"})`}\n});\nconst json = await response.json();`,
     Swift: `var request = URLRequest(url: URL(string: "${endpoint.path}")!)\nrequest.httpMethod = "${endpoint.method}"\nrequest.setValue("Bearer ${token || "<jwt>"}", forHTTPHeaderField: "Authorization")`,
-    Kotlin: `client.request("${endpoint.path}") {\n  method = HttpMethod.${endpoint.method === "GET" ? "Get" : endpoint.method === "POST" ? "Post" : "Patch"}\n  bearerAuth("${token || "<jwt>"}")\n}`,
+    Kotlin: `client.request("${endpoint.path}") {\n  method = HttpMethod.${endpoint.method === "GET" ? "Get" : endpoint.method === "POST" ? "Post" : endpoint.method === "DELETE" ? "Delete" : "Patch"}\n  bearerAuth("${token || "<jwt>"}")\n}`,
   };
 }
