@@ -23,6 +23,30 @@ const endpoints: Endpoint[] = [
   { group: "Notifications", method: "GET", path: "/api/v1/notifications", summary: "List notifications", safeTry: true },
   { group: "Wallet", method: "GET", path: "/api/v1/wallet", summary: "Get wallet", safeTry: true },
   { group: "Support", method: "GET", path: "/api/v1/support/tickets", summary: "List support tickets", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/health", summary: "Check InternetKudo OCS proxy health", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/catalog", summary: "List supported proxy routes and documented OCS commands", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/reseller-accounts", summary: "List reseller accounts through the gateway", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/reseller-info?id=567", summary: "Read reseller info and balance", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/network-profiles?resellerId=567", summary: "List network profiles", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/location-zones?resellerId=567", summary: "List location zones", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/destination-lists?resellerId=567", summary: "List destination lists", safeTry: true },
+  { group: "OCS Gateway", method: "GET", path: "/api/v1/ocs/package-templates?resellerId=567", summary: "List package templates and upstream prices", safeTry: true },
+  {
+    group: "OCS Gateway",
+    method: "POST",
+    path: "/api/v1/ocs/subscriber-packages/search",
+    summary: "Search subscriber prepaid packages by subscriberId, IMSI, ICCID, MSISDN, multiImsi, or activationCode",
+    safeTry: true,
+    body: { subscriberId: 34705265 },
+  },
+  {
+    group: "OCS Gateway",
+    method: "POST",
+    path: "/api/v1/ocs/package-assignments",
+    summary: "Assign an OCS package template to an account with affectPackageToSubscriber",
+    safeTry: false,
+    body: { packageTemplateId: 553, accountId: 40, validityPeriod: 30 },
+  },
   { group: "OCS Admin", method: "GET", path: "/api/admin/ocs/creation?resource=overview", summary: "Pull live OCS inventory", safeTry: true },
   { group: "OCS Admin", method: "GET", path: "/api/admin/ocs/commands", summary: "Documented OCS command catalog", safeTry: true },
   {
@@ -45,8 +69,8 @@ const groups = Array.from(new Set(endpoints.map((endpoint) => endpoint.group)));
 
 export default function ApiDocsPage() {
   const [query, setQuery] = useState("");
-  const [activeGroup, setActiveGroup] = useState("OCS Admin");
-  const [selectedPath, setSelectedPath] = useState("/api/admin/ocs/creation?resource=overview");
+  const [activeGroup, setActiveGroup] = useState("OCS Gateway");
+  const [selectedPath, setSelectedPath] = useState("/api/v1/ocs/catalog");
   const [token, setToken] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [response, setResponse] = useState("");

@@ -258,6 +258,16 @@ function mockCommandResponse(command: Record<string, unknown>): Record<string, u
   if (commandName === "affectPackageToSubscriber") {
     return {
       status: { code: 0, msg: "OK" },
+      affectPackageToSubscriber: {
+        iccid: "8948010000074618117",
+        smdpServer: "smdp.io",
+        activationCode: "K2-2NSYGO-1JIPWW9",
+        urlQrCode: "LPA:1$smdp.io$K2-2NSYGO-1JIPWW9",
+        subscriberId: 34705265,
+        esimId: 34724498,
+        subsPackageId: 181296622,
+        userSimName: "InternetKudo_34705265",
+      },
     };
   }
 

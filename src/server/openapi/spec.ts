@@ -26,6 +26,7 @@ export function getOpenApiSpec() {
       "Support",
       "Webhooks",
       "Admin",
+      "OCS Gateway",
       "OCS Admin",
     ].map((name) => ({ name })),
     components: {
@@ -79,6 +80,39 @@ export function getOpenApiSpec() {
           type: "string",
           enum: ocsCommandCatalog.map((item) => item.command),
           description: "Documented Telco-vision OCS command names tracked by InternetKudo. Raw OCS command execution is not exposed to mobile clients.",
+        },
+        OcsSubscriberIdentifier: {
+          oneOf: [
+            { type: "object", required: ["subscriberId"], properties: { subscriberId: { type: "integer", minimum: 1 } } },
+            { type: "object", required: ["imsi"], properties: { imsi: { type: "string", minLength: 6 } } },
+            { type: "object", required: ["iccid"], properties: { iccid: { type: "string", minLength: 8 } } },
+            { type: "object", required: ["msisdn"], properties: { msisdn: { type: "string", minLength: 6 } } },
+            { type: "object", required: ["multiImsi"], properties: { multiImsi: { type: "string", minLength: 6 } } },
+            { type: "object", required: ["activationCode"], properties: { activationCode: { type: "string", minLength: 4 } } },
+          ],
+        },
+        OcsPackageAssignmentRequest: {
+          type: "object",
+          required: ["packageTemplateId", "accountId"],
+          properties: {
+            packageTemplateId: { type: "integer", minimum: 1 },
+            accountId: { type: "integer", minimum: 1, description: "OCS accountForSubs value." },
+            validityPeriod: { type: "integer", minimum: 1 },
+          },
+          examples: [{ packageTemplateId: 553, accountId: 40, validityPeriod: 30 }],
+        },
+        OcsPackageAssignment: {
+          type: "object",
+          properties: {
+            iccid: { type: ["string", "null"] },
+            smdpServer: { type: ["string", "null"] },
+            activationCode: { type: ["string", "null"] },
+            urlQrCode: { type: ["string", "null"], description: "LPA QR payload used by the mobile app QR renderer." },
+            subscriberId: { type: ["integer", "null"] },
+            esimId: { type: ["integer", "null"] },
+            subsPackageId: { type: ["integer", "null"] },
+            userSimName: { type: ["string", "null"] },
+          },
         },
         OcsCreateLocationZoneRequest: {
           type: "object",
@@ -170,6 +204,54 @@ export function getOpenApiSpec() {
       "/referrals/apply": post("Referrals", "Apply a referral code"),
       "/support/tickets": { ...post("Support", "Create support ticket"), ...get("Support", "List support tickets") },
       "/support/tickets/{ticketId}": get("Support", "Get support ticket"),
+      "/ocs/health": get("OCS Gateway", "Check InternetKudo OCS proxy health"),
+      "/ocs/catalog": get("OCS Gateway", "List supported OCS proxy routes and documented upstream commands"),
+      "/ocs/reseller-accounts": get("OCS Gateway", "List reseller accounts through the secure gateway"),
+      "/ocs/reseller-info": {
+        get: {
+          tags: ["OCS Gateway"],
+          summary: "Read reseller info and balance",
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: "id", in: "query", required: false, schema: { type: "integer" } }],
+          responses: openApiResponses(),
+        },
+      },
+      "/ocs/network-profiles": ocsResellerScopedGet("List OCS network profiles"),
+      "/ocs/location-zones": ocsResellerScopedGet("List OCS location zones"),
+      "/ocs/destination-lists": ocsResellerScopedGet("List OCS destination lists"),
+      "/ocs/package-templates": ocsResellerScopedGet("List OCS package templates and upstream prices"),
+      "/ocs/subscriber-packages/search": {
+        post: {
+          tags: ["OCS Gateway"],
+          summary: "Search subscriber prepaid packages",
+          description: "InternetKudo wrapper for listSubscriberPrepaidPackages. Accepts exactly one supported identifier and returns normalized package usage data.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { $ref: "#/components/schemas/OcsSubscriberIdentifier" }, examples: { subscriberId: { value: { subscriberId: 34705265 } }, iccid: { value: { iccid: "8948010000074618117" } } } } },
+          },
+          responses: openApiResponses(),
+        },
+      },
+      "/ocs/package-assignments": {
+        post: {
+          tags: ["OCS Gateway"],
+          summary: "Assign an OCS package template to an account",
+          description: "InternetKudo wrapper for affectPackageToSubscriber. In production this must be called only after Stripe payment confirmation and ownership checks.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { $ref: "#/components/schemas/OcsPackageAssignmentRequest" } } },
+          },
+          responses: {
+            "201": {
+              description: "Package assignment created",
+              content: { "application/json": { schema: { allOf: [{ $ref: "#/components/schemas/ApiResponse" }] } } },
+            },
+            ...openApiResponses(),
+          },
+        },
+      },
       "/api/admin/ocs/creation": {
         get: {
           tags: ["OCS Admin"],
@@ -229,6 +311,18 @@ function post(tag: string, summary: string) {
 
 function patch(tag: string, summary: string) {
   return operation("patch", tag, summary);
+}
+
+function ocsResellerScopedGet(summary: string) {
+  return {
+    get: {
+      tags: ["OCS Gateway"],
+      summary,
+      security: [{ bearerAuth: [] }],
+      parameters: [{ name: "resellerId", in: "query", required: false, schema: { type: "integer" } }],
+      responses: openApiResponses(),
+    },
+  };
 }
 
 function operation(method: "get" | "post" | "patch", tag: string, summary: string) {

@@ -2,7 +2,23 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { esimsConfig, ordersConfig, packagesConfig } from "@/components/admin/operations-data";
+import {
+  affectPackageToSubscriberCommand,
+  getResellerInfoCommand,
+  listDetailedDestinationListCommand,
+  listDetailedLocationZoneCommand,
+  listNetworkProfileCommand,
+  listPrepaidPackageTemplateCommand,
+  listResellerAccountCommand,
+} from "@/server/ocs/commands";
+import { getEnv } from "@/server/ocs/config";
+import { OcsApiError, ocsErrorDescriptions } from "@/server/ocs/errors";
+import { getOcsClient } from "@/server/ocs/client";
+import { getCurrentAdmin } from "@/server/auth/admin-auth";
 import { getPublicPlans } from "@/server/supabase/packages";
+import { ocsCommandCatalog } from "@/lib/ocs/catalog";
+import { checkRateLimit } from "@/server/security/rate-limit";
+import type { OcsIdentifier } from "@/server/ocs/types";
 
 const checkoutSchema = z.object({
   planId: z.string().min(1),
@@ -14,6 +30,23 @@ const supportSchema = z.object({
   subject: z.string().min(3),
   message: z.string().min(10),
   orderId: z.string().optional(),
+});
+
+const ocsIdentifierSchema = z.object({
+  subscriberId: z.number().int().positive().optional(),
+  imsi: z.string().min(6).max(32).optional(),
+  iccid: z.string().min(8).max(32).optional(),
+  msisdn: z.string().min(6).max(24).optional(),
+  multiImsi: z.string().min(6).max(32).optional(),
+  activationCode: z.string().min(4).max(160).optional(),
+}).refine((value) => Object.values(value).filter((item) => item !== undefined).length === 1, {
+  message: "Provide exactly one subscriber identifier.",
+}).transform((value) => value as OcsIdentifier);
+
+const ocsPackageAssignmentSchema = z.object({
+  packageTemplateId: z.number().int().positive(),
+  accountId: z.number().int().positive(),
+  validityPeriod: z.number().int().positive().optional(),
 });
 
 function ok(data: unknown, status = 200) {
@@ -46,6 +79,10 @@ function fail(code: string, message: string, status = 400, fieldErrors?: Record<
 export async function GET(request: NextRequest, { params }: { params: Promise<{ segments?: string[] }> }) {
   const { segments = [] } = await params;
   const path = segments.join("/");
+
+  if (segments[0] === "ocs") {
+    return handleOcsGet(request, segments.slice(1));
+  }
 
   if (path === "auth/me") {
     return ok({ id: "cus_ayla", name: "Ayla Demir", email: "ayla@example.com", mode: "mock" });
@@ -115,6 +152,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const path = segments.join("/");
   const body = await readJson(request);
 
+  if (segments[0] === "ocs") {
+    return handleOcsPost(request, segments.slice(1), body);
+  }
+
   if (path === "auth/register" || path === "auth/login") {
     return ok({ accessToken: "mock.jwt.token", refreshToken: "mock.refresh.token", user: { id: "cus_mock", email: body.email ?? "customer@example.com" } });
   }
@@ -170,6 +211,220 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 function readJson(request: NextRequest) {
   return request.json().catch(() => ({}));
+}
+
+async function handleOcsGet(request: NextRequest, segments: string[]) {
+  const accessError = await requireOcsProxyAccess(request);
+  if (accessError) return accessError;
+
+  const rateLimit = checkRateLimit(`ocs:${clientIp(request)}:${segments.join("/")}`, 45, 60_000);
+  if (!rateLimit.allowed) return fail("RATE_LIMITED", "Too many OCS proxy requests. Try again shortly.", 429);
+
+  const env = getEnv();
+  const client = getOcsClient();
+  const resource = segments.join("/");
+  const resellerId = queryNumber(request, "resellerId") ?? positiveNumber(env.OCS_RESELLER_ID);
+
+  try {
+    if (resource === "health") {
+      return ok({
+        status: "healthy",
+        mode: env.OCS_MOCK_MODE ? "mock" : "live",
+        upstreamConfigured: Boolean(env.OCS_API_BASE_URL),
+        proxy: "InternetKudo OCS Gateway",
+      });
+    }
+
+    if (resource === "catalog") {
+      return ok({
+        proxyRoutes: internetKudoOcsProxyCatalog(),
+        upstreamCommands: ocsCommandCatalog.map((item) => ({
+          group: item.group,
+          command: item.command,
+          safety: item.safety,
+          version: item.version,
+          description: item.description,
+        })),
+      });
+    }
+
+    if (resource === "reseller-accounts") {
+      return ok(await client.executeCommand(listResellerAccountCommand()));
+    }
+
+    if (resource === "reseller-info") {
+      const id = queryNumber(request, "id") ?? resellerId;
+      return ok(await client.executeCommand(getResellerInfoCommand(id ? { id } : {})));
+    }
+
+    if (!resellerId) {
+      return fail("INVALID_RESELLER_ID", "A reseller ID is required for this OCS proxy route.", 400);
+    }
+
+    if (resource === "network-profiles") {
+      return ok(await client.executeCommand(listNetworkProfileCommand({ resellerId })));
+    }
+
+    if (resource === "location-zones") {
+      return ok(await client.executeCommand(listDetailedLocationZoneCommand(resellerId)));
+    }
+
+    if (resource === "destination-lists") {
+      return ok(await client.executeCommand(listDetailedDestinationListCommand(resellerId)));
+    }
+
+    if (resource === "package-templates") {
+      return ok(await client.executeCommand(listPrepaidPackageTemplateCommand({ resellerId })));
+    }
+
+    return fail("OCS_PROXY_ROUTE_NOT_FOUND", "This InternetKudo OCS proxy route is not defined.", 404);
+  } catch (error) {
+    return handleOcsProxyError(error);
+  }
+}
+
+async function handleOcsPost(request: NextRequest, segments: string[], body: unknown) {
+  const accessError = await requireOcsProxyAccess(request);
+  if (accessError) return accessError;
+
+  const rateLimit = checkRateLimit(`ocs:${clientIp(request)}:${segments.join("/")}`, 20, 60_000);
+  if (!rateLimit.allowed) return fail("RATE_LIMITED", "Too many OCS proxy requests. Try again shortly.", 429);
+
+  const client = getOcsClient();
+  const resource = segments.join("/");
+
+  try {
+    if (resource === "subscriber-packages/search") {
+      const parsed = ocsIdentifierSchema.safeParse(body);
+      if (!parsed.success) {
+        return fail("VALIDATION_ERROR", "Provide exactly one supported subscriber identifier.", 400, z.flattenError(parsed.error).fieldErrors);
+      }
+
+      const packages = await client.listSubscriberPrepaidPackages(parsed.data);
+      return ok({ packages, identifierType: Object.keys(parsed.data)[0] });
+    }
+
+    if (resource === "package-assignments") {
+      const originError = assertSameOrigin(request);
+      if (originError) return fail("FORBIDDEN_ORIGIN", originError, 403);
+
+      const parsed = ocsPackageAssignmentSchema.safeParse(body);
+      if (!parsed.success) {
+        return fail("VALIDATION_ERROR", "Package assignment payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+      }
+
+      const command = affectPackageToSubscriberCommand({
+        packageTemplateId: parsed.data.packageTemplateId,
+        accountForSubs: parsed.data.accountId,
+        validityPeriod: parsed.data.validityPeriod,
+      });
+      const response = await client.executeCommand(command);
+      return ok({
+        assignment: extractPackageAssignmentDetails(response),
+        upstreamStatus: response.status,
+        response,
+      }, 201);
+    }
+
+    return fail("OCS_PROXY_ROUTE_NOT_FOUND", "This InternetKudo OCS proxy route is not defined.", 404);
+  } catch (error) {
+    return handleOcsProxyError(error);
+  }
+}
+
+async function requireOcsProxyAccess(request: NextRequest) {
+  const admin = await getCurrentAdmin().catch(() => null);
+  if (admin) return null;
+
+  const bearer = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  const configuredToken = process.env.INTERNETKUDO_API_GATEWAY_TOKEN;
+  if (bearer && configuredToken && bearer === configuredToken) return null;
+
+  return fail("AUTHENTICATION_REQUIRED", "OCS proxy routes require an authenticated InternetKudo gateway session.", 401);
+}
+
+function assertSameOrigin(request: NextRequest) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) return null;
+
+  const expected = new URL(appUrl).origin;
+  const origin = request.headers.get("origin");
+  const referer = request.headers.get("referer");
+
+  if (origin && origin !== expected) return "Request origin does not match the configured app URL.";
+  if (referer && new URL(referer).origin !== expected) return "Request referer does not match the configured app URL.";
+  return null;
+}
+
+function queryNumber(request: NextRequest, key: string) {
+  const value = request.nextUrl.searchParams.get(key);
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function clientIp(request: NextRequest) {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || request.headers.get("x-real-ip")
+    || "unknown";
+}
+
+function handleOcsProxyError(error: unknown) {
+  if (error instanceof OcsApiError) {
+    const upstreamName = ocsErrorDescriptions[error.upstreamCode as keyof typeof ocsErrorDescriptions] ?? "UNKNOWN_OCS_ERROR";
+    return fail("OCS_UPSTREAM_ERROR", `OCS ${error.upstreamCode} ${upstreamName}: ${error.safePublicMessage}`, error.httpStatus);
+  }
+
+  if (error instanceof Error) {
+    return fail("OCS_PROXY_FAILED", error.message, 500);
+  }
+
+  return fail("OCS_PROXY_FAILED", "Unknown OCS proxy failure.", 500);
+}
+
+function extractPackageAssignmentDetails(response: Record<string, unknown>) {
+  const nested = response.affectPackageToSubscriber;
+  const source = nested && typeof nested === "object" ? nested as Record<string, unknown> : response;
+
+  return {
+    iccid: stringOrNull(source.iccid),
+    smdpServer: stringOrNull(source.smdpServer),
+    activationCode: stringOrNull(source.activationCode),
+    urlQrCode: stringOrNull(source.urlQrCode),
+    subscriberId: numberOrNull(source.subscriberId),
+    esimId: numberOrNull(source.esimId),
+    subsPackageId: numberOrNull(source.subsPackageId),
+    userSimName: stringOrNull(source.userSimName),
+  };
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberOrNull(value: unknown) {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function positiveNumber(value: unknown) {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function internetKudoOcsProxyCatalog() {
+  return [
+    { method: "GET", path: "/api/v1/ocs/health", description: "Check InternetKudo OCS proxy health." },
+    { method: "GET", path: "/api/v1/ocs/catalog", description: "List supported InternetKudo OCS proxy routes and documented upstream commands." },
+    { method: "GET", path: "/api/v1/ocs/reseller-accounts", description: "List reseller accounts through the secure gateway." },
+    { method: "GET", path: "/api/v1/ocs/reseller-info?id=567", description: "Read reseller details and balance." },
+    { method: "GET", path: "/api/v1/ocs/network-profiles?resellerId=567", description: "List OCS network profiles." },
+    { method: "GET", path: "/api/v1/ocs/location-zones?resellerId=567", description: "List OCS location zones." },
+    { method: "GET", path: "/api/v1/ocs/destination-lists?resellerId=567", description: "List OCS destination lists." },
+    { method: "GET", path: "/api/v1/ocs/package-templates?resellerId=567", description: "List OCS package templates and upstream costs." },
+    { method: "POST", path: "/api/v1/ocs/subscriber-packages/search", description: "Search subscriber prepaid packages by subscriberId, IMSI, ICCID, MSISDN, multiImsi, or activationCode." },
+    { method: "POST", path: "/api/v1/ocs/package-assignments", description: "Assign a package template to an account with affectPackageToSubscriber." },
+  ];
 }
 
 function countryName(code?: string) {
