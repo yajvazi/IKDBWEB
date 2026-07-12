@@ -131,6 +131,32 @@ function templateData(template: Record<string, unknown>) {
   return bytes > 0 ? bytesToHuman(bytes) : "n/a";
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function createdPackageDetails(response: unknown) {
+  const root = asRecord(response);
+  const nested = asRecord(root?.affectPackageToSubscriber);
+  const source = nested ?? root ?? {};
+
+  return {
+    iccid: source.iccid,
+    smdpServer: source.smdpServer,
+    activationCode: source.activationCode,
+    urlQrCode: source.urlQrCode,
+    subscriberId: source.subscriberId,
+    esimId: source.esimId,
+    subsPackageId: source.subsPackageId,
+    userSimName: source.userSimName,
+  };
+}
+
+function displayValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "n/a";
+  return String(value);
+}
+
 function safetyClass(safety: OcsCommandSafety) {
   if (safety === "read") return "border-blue-100 bg-blue-50 text-blue-700";
   if (safety === "write") return "border-lime-200 bg-lime-50 text-green-700";
@@ -385,15 +411,21 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       };
     }
 
-    QRCode.toDataURL(jsonString({
+    const details = createdPackageDetails(createdAccountPackage.response);
+    const qrPayload = typeof details.urlQrCode === "string" && details.urlQrCode.trim()
+      ? details.urlQrCode
+      : jsonString({
       type: "internetkudo-ocs-account-package",
       createdAt: createdAccountPackage.createdAt,
       accountId: createdAccountPackage.account?.id ?? null,
       packageTemplateId: createdAccountPackage.template ? templateId(createdAccountPackage.template) : null,
       packageTemplateName: createdAccountPackage.template ? templateDisplayName(createdAccountPackage.template) : null,
+      ...details,
       command: createdAccountPackage.command,
       response: createdAccountPackage.response,
-    }), {
+    });
+
+    QRCode.toDataURL(qrPayload, {
       errorCorrectionLevel: "M",
       margin: 2,
       width: 288,
@@ -809,6 +841,10 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
                   ) : null}
                 </div>
                 <div>
+                  {(() => {
+                    const details = createdPackageDetails(createdAccountPackage.response);
+                    return (
+                      <>
                   <div className="flex flex-wrap items-center gap-2">
                     <CheckCircle2 className="h-5 w-5 text-green-700" />
                     <h3 className="text-sm font-bold text-slate-950">Package created in OCS</h3>
@@ -824,14 +860,25 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
                       { label: "Validity", value: `${validityPeriod || "n/a"} days` },
                       { label: "Cost", value: createdAccountPackage.template?.cost ?? "n/a" },
                       { label: "Created", value: new Date(createdAccountPackage.createdAt).toLocaleString() },
+                      { label: "ICCID", value: details.iccid },
+                      { label: "SM-DP+ server", value: details.smdpServer },
+                      { label: "Activation code", value: details.activationCode },
+                      { label: "URL QR code", value: details.urlQrCode },
+                      { label: "Subscriber ID", value: details.subscriberId },
+                      { label: "eSIM ID", value: details.esimId },
+                      { label: "Subscriber package ID", value: details.subsPackageId },
+                      { label: "User SIM name", value: details.userSimName },
                     ].map((item) => (
                       <div key={item.label} className="rounded-md border border-border bg-white px-3 py-2">
                         <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
-                        <div className="mt-1 break-words text-sm font-semibold text-slate-900">{String(item.value)}</div>
+                        <div className="mt-1 break-words text-sm font-semibold text-slate-900">{displayValue(item.value)}</div>
                       </div>
                     ))}
                   </div>
                   <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">{jsonString(createdAccountPackage.response)}</pre>
+                      </>
+                    );
+                  })()}
                 </div>
               </section>
             ) : null}
