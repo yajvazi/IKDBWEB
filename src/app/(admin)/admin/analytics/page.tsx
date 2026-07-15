@@ -7,6 +7,7 @@ import {
   ProfitLineChart,
   RevenueAreaChart,
 } from "@/components/charts/dashboard-charts";
+import { requireAdminPageAccess } from "@/server/auth/admin-access";
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -19,7 +20,9 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export default function AnalyticsPage() {
+export default async function AnalyticsPage() {
+  await requireAdminPageAccess("analytics");
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

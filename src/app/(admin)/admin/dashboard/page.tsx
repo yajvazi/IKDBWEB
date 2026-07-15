@@ -10,6 +10,7 @@ import {
   ProfitLineChart,
   RevenueAreaChart,
 } from "@/components/charts/dashboard-charts";
+import { requireAdminPageAccess } from "@/server/auth/admin-access";
 
 function Card({ title, action, children, className = "" }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
@@ -27,6 +28,8 @@ export const revalidate = 300;
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  await requireAdminPageAccess("dashboard");
+
   const kpis = await getDashboardKpis();
   const analytics = await getDashboardAnalytics();
 

@@ -1,0 +1,376 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Building2, KeyRound, RefreshCw, Save } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/admin/status-badge";
+import { adminApiGroupOptions, adminPageOptions, type AdminApiGroup, type AdminPageKey } from "@/lib/admin/pages";
+import { showToast } from "@/lib/toastify";
+import { cn } from "@/lib/utils";
+
+type SubresellerProfile = {
+  id: string;
+  name: string;
+  active: boolean;
+  ocsResellerId: number;
+  ocsAccountId: number | null;
+  stripeProfileId: string;
+  stripeAccountId: string | null;
+  rateLimitPerMinute: number;
+  adminEmail: string | null;
+  allowedDashboardPages: AdminPageKey[];
+  allowedApiGroups: AdminApiGroup[];
+  canViewCosts: boolean;
+  canIssueRefunds: boolean;
+  canRevealEsimSecrets: boolean;
+  notes: string | null;
+  updatedAt: string;
+};
+
+type FormState = {
+  id?: string;
+  name: string;
+  active: boolean;
+  ocsResellerId: string;
+  ocsAccountId: string;
+  stripeProfileId: string;
+  stripeAccountId: string;
+  adminEmail: string;
+  allowedDashboardPages: AdminPageKey[];
+  allowedApiGroups: AdminApiGroup[];
+  rateLimitPerMinute: string;
+  canViewCosts: boolean;
+  canIssueRefunds: boolean;
+  canRevealEsimSecrets: boolean;
+  notes: string;
+};
+
+const defaultForm: FormState = {
+  name: "",
+  active: true,
+  ocsResellerId: "",
+  ocsAccountId: "",
+  stripeProfileId: "internetkudo-platform",
+  stripeAccountId: "",
+  adminEmail: "",
+  allowedDashboardPages: ["dashboard", "orders", "packages", "esims"],
+  allowedApiGroups: ["Countries", "Plans", "Checkout", "Orders", "eSIMs", "Top-ups"],
+  rateLimitPerMinute: "120",
+  canViewCosts: false,
+  canIssueRefunds: false,
+  canRevealEsimSecrets: false,
+  notes: "",
+};
+
+export function SubresellerSettings() {
+  const [profiles, setProfiles] = useState<SubresellerProfile[]>([]);
+  const [form, setForm] = useState<FormState>(defaultForm);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    void loadProfiles(false);
+  }, []);
+
+  const filteredProfiles = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return profiles;
+    return profiles.filter((profile) => `${profile.name} ${profile.adminEmail ?? ""} ${profile.ocsResellerId} ${profile.ocsAccountId ?? ""}`.toLowerCase().includes(normalized));
+  }, [profiles, query]);
+
+  async function loadProfiles(notify = true) {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/admin/subresellers", { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok || !json.success) throw new Error(json.error?.message ?? "Unable to load subreseller settings.");
+      setProfiles(json.data.profiles);
+      if (notify) showToast("Subreseller settings refreshed.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to load subreseller settings.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        id: form.id,
+        name: form.name.trim(),
+        active: form.active,
+        ocsResellerId: Number(form.ocsResellerId),
+        ocsAccountId: form.ocsAccountId ? Number(form.ocsAccountId) : null,
+        stripeProfileId: form.stripeProfileId.trim() || "internetkudo-platform",
+        stripeAccountId: form.stripeAccountId.trim() || null,
+        adminEmail: form.adminEmail.trim() || null,
+        allowedDashboardPages: form.allowedDashboardPages,
+        allowedApiGroups: form.allowedApiGroups,
+        rateLimitPerMinute: Number(form.rateLimitPerMinute),
+        canViewCosts: form.canViewCosts,
+        canIssueRefunds: form.canIssueRefunds,
+        canRevealEsimSecrets: form.canRevealEsimSecrets,
+        notes: form.notes.trim() || null,
+      };
+
+      const response = await fetch("/api/admin/subresellers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await response.json();
+      if (!response.ok || !json.success) throw new Error(json.error?.message ?? "Unable to save subreseller settings.");
+
+      setProfiles((current) => [json.data.profile, ...current.filter((profile) => profile.id !== json.data.profile.id)]);
+      setForm(defaultForm);
+      showToast("Subreseller access saved.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to save subreseller settings.", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function editProfile(profile: SubresellerProfile) {
+    setForm({
+      id: profile.id,
+      name: profile.name,
+      active: profile.active,
+      ocsResellerId: String(profile.ocsResellerId),
+      ocsAccountId: profile.ocsAccountId ? String(profile.ocsAccountId) : "",
+      stripeProfileId: profile.stripeProfileId,
+      stripeAccountId: profile.stripeAccountId ?? "",
+      adminEmail: profile.adminEmail ?? "",
+      allowedDashboardPages: profile.allowedDashboardPages.length ? profile.allowedDashboardPages : defaultForm.allowedDashboardPages,
+      allowedApiGroups: profile.allowedApiGroups.length ? profile.allowedApiGroups : defaultForm.allowedApiGroups,
+      rateLimitPerMinute: String(profile.rateLimitPerMinute),
+      canViewCosts: profile.canViewCosts,
+      canIssueRefunds: profile.canIssueRefunds,
+      canRevealEsimSecrets: profile.canRevealEsimSecrets,
+      notes: profile.notes ?? "",
+    });
+    showToast(`Editing ${profile.name}.`, "info");
+  }
+
+  function togglePage(key: AdminPageKey) {
+    setForm((current) => ({
+      ...current,
+      allowedDashboardPages: toggleValue(current.allowedDashboardPages, key),
+    }));
+  }
+
+  function toggleApiGroup(group: AdminApiGroup) {
+    setForm((current) => ({
+      ...current,
+      allowedApiGroups: toggleValue(current.allowedApiGroups, group),
+    }));
+  }
+
+  return (
+    <section className="rounded-lg border border-border bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-bold text-slate-950">Subreseller access and API profiles</h2>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">Configure dashboard limits, OCS routing, Stripe profile mapping, and API group access for future subresellers.</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={() => loadProfiles(true)} disabled={loading}>
+          <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+          Refresh profiles
+        </Button>
+      </div>
+
+      <div className="grid gap-5 p-5 2xl:grid-cols-[minmax(0,1fr)_520px]">
+        <div className="space-y-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm font-semibold text-slate-900">{profiles.length} configured profiles</div>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search reseller, admin, account..."
+              className="h-9 w-full rounded-md border border-border bg-white px-3 text-sm outline-none ring-primary/20 focus:ring-4 md:w-72"
+            />
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="grid grid-cols-[1.1fr_0.9fr_0.9fr_0.8fr] border-b border-border bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <span>Subreseller</span>
+              <span>OCS routing</span>
+              <span>Admin scope</span>
+              <span>Status</span>
+            </div>
+            <div className="max-h-[420px] overflow-auto">
+              {loading && profiles.length === 0 ? (
+                <div className="space-y-3 p-3">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <Skeleton key={index} className="h-16 w-full" />
+                  ))}
+                </div>
+              ) : filteredProfiles.length === 0 ? (
+                <div className="p-4 text-sm text-slate-500">No subreseller profiles match this search.</div>
+              ) : (
+                filteredProfiles.map((profile) => (
+                  <button
+                    key={profile.id}
+                    type="button"
+                    onClick={() => editProfile(profile)}
+                    className="grid w-full grid-cols-[1.1fr_0.9fr_0.9fr_0.8fr] items-center gap-3 border-b border-border px-3 py-3 text-left text-sm transition-colors last:border-0 hover:bg-blue-50"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-slate-950">{profile.name}</div>
+                      <div className="truncate text-xs text-slate-500">{profile.adminEmail ?? "No admin email assigned"}</div>
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      <div>Reseller {profile.ocsResellerId}</div>
+                      <div>Account {profile.ocsAccountId ?? "default"}</div>
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      <div>{profile.allowedDashboardPages.length} pages</div>
+                      <div>{profile.allowedApiGroups.length} API groups</div>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      <StatusBadge tone={profile.active ? "success" : "neutral"}>{profile.active ? "Active" : "Disabled"}</StatusBadge>
+                      {profile.canIssueRefunds ? <StatusBadge tone="warning">Refunds</StatusBadge> : null}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <form className="rounded-lg border border-blue-100 bg-blue-50 p-4" onSubmit={saveProfile}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-950">
+              <KeyRound className="h-4 w-4 text-primary" />
+              {form.id ? "Edit subreseller profile" : "Create subreseller profile"}
+            </div>
+            {form.id ? (
+              <Button type="button" size="xs" variant="outline" onClick={() => setForm(defaultForm)}>
+                New
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <TextInput label="Subreseller name" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
+            <TextInput label="Admin email" type="email" value={form.adminEmail} onChange={(value) => setForm((current) => ({ ...current, adminEmail: value }))} />
+            <TextInput label="OCS reseller ID" inputMode="numeric" value={form.ocsResellerId} onChange={(value) => setForm((current) => ({ ...current, ocsResellerId: value }))} />
+            <TextInput label="OCS account ID" inputMode="numeric" value={form.ocsAccountId} onChange={(value) => setForm((current) => ({ ...current, ocsAccountId: value }))} />
+            <TextInput label="Stripe profile ID" value={form.stripeProfileId} onChange={(value) => setForm((current) => ({ ...current, stripeProfileId: value }))} />
+            <TextInput label="Stripe connected account" value={form.stripeAccountId} onChange={(value) => setForm((current) => ({ ...current, stripeAccountId: value }))} />
+            <TextInput label="Rate limit per minute" inputMode="numeric" value={form.rateLimitPerMinute} onChange={(value) => setForm((current) => ({ ...current, rateLimitPerMinute: value }))} />
+            <label className="flex items-center gap-2 rounded-md border border-border bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <input type="checkbox" checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
+              Active profile
+            </label>
+          </div>
+
+          <fieldset className="mt-4 rounded-lg border border-border bg-white p-3">
+            <legend className="px-1 text-xs font-bold uppercase tracking-wide text-slate-500">Dashboard pages</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {adminPageOptions.map((page) => (
+                <CheckboxPill key={page.key} checked={form.allowedDashboardPages.includes(page.key)} label={page.label} onClick={() => togglePage(page.key)} />
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="mt-4 rounded-lg border border-border bg-white p-3">
+            <legend className="px-1 text-xs font-bold uppercase tracking-wide text-slate-500">API groups</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {adminApiGroupOptions.map((group) => (
+                <CheckboxPill key={group} checked={form.allowedApiGroups.includes(group)} label={group} onClick={() => toggleApiGroup(group)} />
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <Flag checked={form.canViewCosts} label="View costs" onChange={(checked) => setForm((current) => ({ ...current, canViewCosts: checked }))} />
+            <Flag checked={form.canIssueRefunds} label="Issue refunds" onChange={(checked) => setForm((current) => ({ ...current, canIssueRefunds: checked }))} />
+            <Flag checked={form.canRevealEsimSecrets} label="Reveal eSIM secrets" onChange={(checked) => setForm((current) => ({ ...current, canRevealEsimSecrets: checked }))} />
+          </div>
+
+          <label className="mt-4 block">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Internal notes</span>
+            <textarea
+              value={form.notes}
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              className="mt-1 min-h-20 w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none ring-primary/20 focus:ring-4"
+            />
+          </label>
+
+          <p className="mt-3 rounded-md bg-white p-3 text-xs leading-5 text-slate-600">
+            Stripe secret keys stay server-side. This profile stores routing identifiers only; live secret values should be mapped by profile ID in the encrypted runtime environment.
+          </p>
+
+          <Button type="submit" className="mt-4 w-full" disabled={saving}>
+            <Save className="h-4 w-4" />
+            {saving ? "Saving..." : "Save subreseller profile"}
+          </Button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function TextInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  inputMode?: "numeric";
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+      <input
+        type={type}
+        inputMode={inputMode}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none ring-primary/20 focus:ring-4"
+      />
+    </label>
+  );
+}
+
+function CheckboxPill({ checked, label, onClick }: { checked: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex h-9 items-center justify-between rounded-md border px-3 text-left text-xs font-semibold transition-colors",
+        checked ? "border-primary bg-blue-50 text-primary" : "border-border bg-white text-slate-600 hover:bg-slate-50",
+      )}
+    >
+      <span className="truncate">{label}</span>
+      <span className={cn("ml-2 h-2.5 w-2.5 rounded-full", checked ? "bg-lime-400" : "bg-slate-200")} />
+    </button>
+  );
+}
+
+function Flag({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-2 rounded-md border border-border bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      {label}
+    </label>
+  );
+}
+
+function toggleValue<T>(values: T[], value: T) {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}

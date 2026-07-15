@@ -22,6 +22,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { pageKeyFromHref, type AdminPageKey } from "@/lib/admin/pages";
 
 const navItems = [
   { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
@@ -42,8 +43,14 @@ const navItems = [
 
 export { navItems };
 
-export function AdminSidebar() {
+export function AdminSidebar({ allowedPageKeys }: { allowedPageKeys?: AdminPageKey[] | null }) {
   const pathname = usePathname();
+  const visibleItems = allowedPageKeys?.length
+    ? navItems.filter((item) => {
+      const key = pageKeyFromHref(item.href);
+      return key ? allowedPageKeys.includes(key) : true;
+    })
+    : navItems;
 
   return (
     <aside className="hidden h-screen w-[232px] shrink-0 border-r border-border bg-sidebar px-4 py-5 lg:sticky lg:top-0 lg:flex lg:flex-col">
@@ -52,7 +59,7 @@ export function AdminSidebar() {
       </Link>
 
       <nav className="space-y-1">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
 

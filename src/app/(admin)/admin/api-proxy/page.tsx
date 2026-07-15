@@ -1,5 +1,6 @@
 import { ArrowDown, Database, Globe2, LockKeyhole, Server, ShieldCheck, Smartphone, Webhook } from "lucide-react";
 import { StatusBadge } from "@/components/admin/status-badge";
+import { requireAdminPageAccess } from "@/server/auth/admin-access";
 import { getDb } from "@/server/db/client";
 import { getEnv } from "@/server/ocs/config";
 
@@ -20,6 +21,8 @@ type ProxyLog = {
 };
 
 export default async function ApiProxyPage() {
+  await requireAdminPageAccess("api-proxy");
+
   const env = getEnv();
   const logs = await getProxyLogs();
   const health = [
