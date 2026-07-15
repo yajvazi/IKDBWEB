@@ -1,6 +1,9 @@
 import { ocsCommandCatalog } from "@/lib/ocs/catalog";
+import { ringCompatEndpoints, toInternetKudoPath } from "@/lib/ring-compat/endpoints";
 
 export function getOpenApiSpec() {
+  const ringTags = Array.from(new Set(ringCompatEndpoints.map((endpoint) => `Ring - ${endpoint.tag}`)));
+
   return {
     openapi: "3.1.0",
     info: {
@@ -35,6 +38,7 @@ export function getOpenApiSpec() {
       "Admin",
       "OCS Gateway",
       "OCS Admin",
+      ...ringTags,
     ].map((name) => ({ name })),
     components: {
       securitySchemes: {
@@ -354,8 +358,45 @@ export function getOpenApiSpec() {
           responses: openApiResponses(),
         },
       },
+      ...ringOpenApiPaths(),
     },
   };
+}
+
+function ringOpenApiPaths() {
+  return ringCompatEndpoints.reduce<Record<string, Record<string, unknown>>>((paths, endpoint) => {
+    const path = toInternetKudoPath(endpoint.path);
+    paths[path] ??= {};
+    paths[path][endpoint.method.toLowerCase()] = {
+      tags: [`Ring - ${endpoint.tag}`],
+      operationId: endpoint.operationId,
+      summary: endpoint.summary,
+      description: "Ring eSIM Swagger-compatible InternetKudo API Gateway route. The route is served under /api/v1 and normalized by InternetKudo; raw OCS credentials are never exposed.",
+      security: [{ bearerAuth: [] }],
+      parameters: pathParameters(path),
+      ...(endpoint.method === "POST" || endpoint.method === "PATCH" ? {
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      } : {}),
+      responses: openApiResponses(),
+    };
+    return paths;
+  }, {});
+}
+
+function pathParameters(path: string) {
+  return [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
+    name: match[1],
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+  }));
 }
 
 function get(tag: string, summary: string) {

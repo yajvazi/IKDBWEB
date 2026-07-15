@@ -17,6 +17,7 @@ import { getOcsClient } from "@/server/ocs/client";
 import { getCurrentAdmin } from "@/server/auth/admin-auth";
 import { getPublicPlans } from "@/server/supabase/packages";
 import { ocsCommandCatalog } from "@/lib/ocs/catalog";
+import { matchRingCompatEndpoint, toInternetKudoPath, type RingCompatEndpoint } from "@/lib/ring-compat/endpoints";
 import { checkRateLimit } from "@/server/security/rate-limit";
 import { getStripeClient } from "@/server/stripe/client";
 import type { OcsIdentifier } from "@/server/ocs/types";
@@ -358,6 +359,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   if (path === "support/tickets") return ok([{ id: "ticket_1", subject: "Install help", status: "open", lastUpdated: "2026-05-31T10:44:00Z" }]);
 
+  const ringEndpoint = matchRingCompatEndpoint("GET", path);
+  if (ringEndpoint) return ok(ringCompatPayload(ringEndpoint, request.nextUrl.searchParams));
+
   return ok({ route: `/${path}`, mode: "mock", message: "InternetKudo API Gateway mock endpoint. Live adapter is intentionally not enabled." });
 }
 
@@ -508,6 +512,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return ok({ id: "ticket_mock", status: "open", ...parsed.data }, 201);
   }
 
+  const ringEndpoint = matchRingCompatEndpoint("POST", path);
+  if (ringEndpoint) return ok(ringCompatPayload(ringEndpoint, body), ringEndpoint.path.includes("webhook") ? 200 : 202);
+
   return ok({ route: `/${path}`, accepted: true, mode: "mock" }, 202);
 }
 
@@ -530,15 +537,22 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return ok({ paymentMethodId: segments[1], default: true });
   }
 
+  const ringEndpoint = matchRingCompatEndpoint("PATCH", path);
+  if (ringEndpoint) return ok(ringCompatPayload(ringEndpoint, body));
+
   return ok({ route: `/${path}`, updated: true, mode: "mock" });
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ segments?: string[] }> }) {
   const { segments = [] } = await params;
+  const path = segments.join("/");
 
   if (segments[0] === "payment-methods" && segments[1]) {
     return ok({ paymentMethodId: segments[1], deleted: true });
   }
+
+  const ringEndpoint = matchRingCompatEndpoint("DELETE", path);
+  if (ringEndpoint) return ok(ringCompatPayload(ringEndpoint, { deleted: true }));
 
   return fail("ROUTE_NOT_FOUND", "This delete route is not defined.", 404);
 }
@@ -759,6 +773,29 @@ function internetKudoOcsProxyCatalog() {
     { method: "POST", path: "/api/v1/ocs/subscriber-packages/search", description: "Search subscriber prepaid packages by subscriberId, IMSI, ICCID, MSISDN, multiImsi, or activationCode." },
     { method: "POST", path: "/api/v1/ocs/package-assignments", description: "Assign a package template to an account with affectPackageToSubscriber." },
   ];
+}
+
+function ringCompatPayload(endpoint: RingCompatEndpoint, input?: unknown) {
+  return {
+    compatibility: "ringesim",
+    operationId: endpoint.operationId,
+    tag: endpoint.tag,
+    ringPath: endpoint.path,
+    internetKudoPath: `/api/v1${toInternetKudoPath(endpoint.path)}`,
+    method: endpoint.method,
+    status: "available",
+    mode: "compatibility",
+    liveIntegration: liveIntegrationStatus(endpoint),
+    input,
+    note: "This InternetKudo compatibility endpoint follows the Ring eSIM Swagger surface. It is normalized behind the InternetKudo API Gateway and does not expose OCS credentials.",
+  };
+}
+
+function liveIntegrationStatus(endpoint: RingCompatEndpoint) {
+  if (endpoint.path.includes("/payments/create-intent")) return "Use /api/v1/create-payment-intent or /api/v1/checkout/payment-intent for live Stripe PaymentIntent creation.";
+  if (endpoint.path.includes("/orders") && (endpoint.path.includes("/process") || endpoint.path.includes("/topup"))) return "Use /api/v1/orders/complete or /api/v1/iccid/topup for live Stripe-verified OCS provisioning.";
+  if (endpoint.path.includes("/ocs") || endpoint.path.includes("/zones") || endpoint.path.includes("/packages")) return "Use /api/v1/ocs/* and /api/admin/ocs/* for live OCS proxy operations.";
+  return "Compatibility adapter response. Persistent data integration can be attached without changing the client route contract.";
 }
 
 async function websiteSystemStatus() {

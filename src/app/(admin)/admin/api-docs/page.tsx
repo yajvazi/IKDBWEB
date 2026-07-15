@@ -4,6 +4,7 @@ import { Copy, Play, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/lib/toastify";
+import { ringCompatEndpoints, ringDocsPath, sampleBodyForRingEndpoint } from "@/lib/ring-compat/endpoints";
 
 type Endpoint = {
   group: string;
@@ -98,6 +99,14 @@ const endpoints: Endpoint[] = [
     },
   },
   { group: "OpenAPI", method: "GET", path: "/api/openapi.json", summary: "OpenAPI 3.1 JSON", safeTry: true },
+  ...ringCompatEndpoints.map((endpoint) => ({
+    group: `Ring - ${endpoint.tag}`,
+    method: endpoint.method,
+    path: ringDocsPath(endpoint.path),
+    summary: endpoint.summary,
+    safeTry: !endpoint.path.includes("/webhook") && !endpoint.path.includes("/process") && !endpoint.path.includes("/topup") && !endpoint.path.includes("/balance") && !endpoint.path.includes("/adjust") && !endpoint.path.includes("/refund"),
+    body: sampleBodyForRingEndpoint(endpoint),
+  })),
 ];
 
 const groups = Array.from(new Set(endpoints.map((endpoint) => endpoint.group)));
