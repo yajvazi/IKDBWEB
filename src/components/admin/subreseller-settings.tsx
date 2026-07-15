@@ -25,6 +25,10 @@ type SubresellerProfile = {
   canIssueRefunds: boolean;
   canRevealEsimSecrets: boolean;
   notes: string | null;
+  topupCount: number;
+  topupGrossMinor: number;
+  topupStripeFeeMinor: number;
+  topupNetCreditedMinor: number;
   updatedAt: string;
 };
 
@@ -58,15 +62,32 @@ type SubresellerTopup = {
   resellerName: string;
   ocsResellerId: number;
   amountMinor: number;
+  stripeFeeMinor: number;
+  netAmountMinor: number;
   currency: string;
   stripeMode: "live" | "test";
   stripePaymentIntentId: string | null;
+  stripeChargeId: string | null;
   paymentStatus: string;
   ocsStatus: string;
   lastError: string | null;
   createdAt: string;
   paidAt: string | null;
   appliedAt: string | null;
+};
+
+type OcsResellerAccount = {
+  localResellerId: string | null;
+  ocsResellerId: number;
+  name: string;
+  balance: string | number | null;
+  accounts: Array<{
+    localAccountId: string | null;
+    ocsAccountId: number;
+    name: string | null;
+    balance: string | number | null;
+    packageOnly: boolean;
+  }>;
 };
 
 const defaultForm: FormState = {
@@ -96,6 +117,8 @@ export function SubresellerSettings() {
   const [profiles, setProfiles] = useState<SubresellerProfile[]>([]);
   const [form, setForm] = useState<FormState>(defaultForm);
   const [topupSettings, setTopupSettings] = useState<TopupSettings>(defaultTopupSettings);
+  const [ocsResellers, setOcsResellers] = useState<OcsResellerAccount[]>([]);
+  const [ocsSyncError, setOcsSyncError] = useState<string | null>(null);
   const [minimumTopupEur, setMinimumTopupEur] = useState("500");
   const [topups, setTopups] = useState<SubresellerTopup[]>([]);
   const [topupForm, setTopupForm] = useState({ resellerId: "", amountEur: "500" });
@@ -128,6 +151,8 @@ export function SubresellerSettings() {
       ]);
       if (!response.ok || !json.success) throw new Error(json.error?.message ?? "Unable to load subreseller settings.");
       setProfiles(json.data.profiles);
+      setOcsResellers(json.data.ocsResellerAccounts ?? []);
+      setOcsSyncError(json.data.ocsSyncError ?? null);
       if (settingsJson.success) {
         setTopupSettings(settingsJson.data.settings);
         setMinimumTopupEur(minorToInput(settingsJson.data.settings.minimumAmountMinor));
@@ -201,6 +226,17 @@ export function SubresellerSettings() {
       notes: profile.notes ?? "",
     });
     showToast(`Editing ${profile.name}.`, "info");
+  }
+
+  function fillFromOcs(resellerId: string) {
+    const reseller = ocsResellers.find((item) => String(item.ocsResellerId) === resellerId);
+    if (!reseller) return;
+    setForm((current) => ({
+      ...current,
+      name: current.name || reseller.name,
+      ocsResellerId: String(reseller.ocsResellerId),
+      ocsAccountId: reseller.accounts[0] ? String(reseller.accounts[0].ocsAccountId) : current.ocsAccountId,
+    }));
   }
 
   async function saveTopupSettings() {
@@ -345,12 +381,51 @@ export function SubresellerSettings() {
                     <div className="text-xs text-slate-600">
                       <div>{profile.allowedDashboardPages.length} pages</div>
                       <div>{profile.allowedApiGroups.length} API groups</div>
+                      <div>{profile.topupCount} paid top-ups</div>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       <StatusBadge tone={profile.active ? "success" : "neutral"}>{profile.active ? "Active" : "Disabled"}</StatusBadge>
                       {profile.canIssueRefunds ? <StatusBadge tone="warning">Refunds</StatusBadge> : null}
+                      <StatusBadge tone="info">Net {formatMinor(profile.topupNetCreditedMinor, "EUR")}</StatusBadge>
                     </div>
                   </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="border-b border-border bg-slate-50 px-3 py-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">OCS listResellerAccount</div>
+              <div className="text-xs text-slate-500">Live reseller and account inventory synced into profiles on refresh.</div>
+            </div>
+            {ocsSyncError ? <div className="border-b border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{ocsSyncError}</div> : null}
+            <div className="max-h-72 overflow-auto">
+              {loading && ocsResellers.length === 0 ? (
+                <div className="space-y-2 p-3">
+                  {Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-12 w-full" />)}
+                </div>
+              ) : ocsResellers.length === 0 ? (
+                <div className="p-4 text-sm text-slate-500">No OCS resellers returned from listResellerAccount.</div>
+              ) : (
+                ocsResellers.map((reseller) => (
+                  <div key={reseller.ocsResellerId} className="border-b border-border px-3 py-3 text-sm last:border-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-950">{reseller.name}</div>
+                        <div className="text-xs text-slate-500">OCS reseller {reseller.ocsResellerId} · {reseller.accounts.length} accounts</div>
+                      </div>
+                      <div className="text-right text-xs font-semibold text-slate-700">{formatBalance(reseller.balance)}</div>
+                    </div>
+                    <div className="mt-2 grid gap-1">
+                      {reseller.accounts.map((account) => (
+                        <div key={account.ocsAccountId} className="flex items-center justify-between rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                          <span>#{account.ocsAccountId} {account.name ?? "Account"}{account.packageOnly ? " · package only" : ""}</span>
+                          <span className="font-semibold">{formatBalance(account.balance)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 ))
               )}
             </div>
@@ -371,6 +446,21 @@ export function SubresellerSettings() {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
+            <label className="block md:col-span-2">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Fill from OCS reseller</span>
+              <select
+                value=""
+                onChange={(event) => fillFromOcs(event.target.value)}
+                className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none ring-primary/20 focus:ring-4"
+              >
+                <option value="">Select OCS reseller...</option>
+                {ocsResellers.map((reseller) => (
+                  <option key={reseller.ocsResellerId} value={reseller.ocsResellerId}>
+                    {reseller.name} - reseller {reseller.ocsResellerId} - {formatBalance(reseller.balance)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <TextInput label="Subreseller name" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
             <TextInput label="Admin email" type="email" value={form.adminEmail} onChange={(value) => setForm((current) => ({ ...current, adminEmail: value }))} />
             <TextInput label="OCS reseller ID" inputMode="numeric" value={form.ocsResellerId} onChange={(value) => setForm((current) => ({ ...current, ocsResellerId: value }))} />
@@ -435,7 +525,7 @@ export function SubresellerSettings() {
               <CreditCard className="h-5 w-5 text-primary" />
               <h3 className="text-base font-bold text-slate-950">Stripe subreseller balance top-ups</h3>
             </div>
-            <p className="mt-1 text-sm text-slate-500">Create a Stripe PaymentIntent first. After Stripe confirms payment, the webhook credits the OCS reseller with modifyResellerBalance.</p>
+            <p className="mt-1 text-sm text-slate-500">Create a Stripe PaymentIntent first. After Stripe confirms payment, the webhook credits the OCS reseller with the net amount after Stripe fees.</p>
           </div>
           <StatusBadge tone={topupSettings.stripeMode === "live" ? "success" : "warning"}>
             Stripe {topupSettings.stripeMode.toUpperCase()}
@@ -486,7 +576,7 @@ export function SubresellerSettings() {
                     <option value="">Select subreseller</option>
                     {profiles.map((profile) => (
                       <option key={profile.id} value={profile.id}>
-                        {profile.name} - OCS {profile.ocsResellerId}
+                        {profile.name} - OCS {profile.ocsResellerId} - net credited {formatMinor(profile.topupNetCreditedMinor, "EUR")}
                       </option>
                     ))}
                   </select>
@@ -514,11 +604,12 @@ export function SubresellerSettings() {
           </div>
 
           <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[1.2fr_0.8fr_0.7fr_0.8fr_0.8fr_0.7fr] border-b border-border bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <div className="grid grid-cols-[1.15fr_0.7fr_0.7fr_0.7fr_0.7fr_0.75fr_0.6fr] border-b border-border bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
               <span>Subreseller</span>
-              <span>Amount</span>
+              <span>Gross</span>
+              <span>Stripe fee</span>
+              <span>OCS credit</span>
               <span>Mode</span>
-              <span>Payment</span>
               <span>OCS</span>
               <span>Action</span>
             </div>
@@ -533,15 +624,17 @@ export function SubresellerSettings() {
                 <div className="p-4 text-sm text-slate-500">No subreseller top-ups have been created yet.</div>
               ) : (
                 topups.map((topup) => (
-                  <div key={topup.id} className="grid grid-cols-[1.2fr_0.8fr_0.7fr_0.8fr_0.8fr_0.7fr] items-center gap-3 border-b border-border px-3 py-3 text-sm last:border-0">
+                  <div key={topup.id} className="grid grid-cols-[1.15fr_0.7fr_0.7fr_0.7fr_0.7fr_0.75fr_0.6fr] items-center gap-3 border-b border-border px-3 py-3 text-sm last:border-0">
                     <div className="min-w-0">
                       <div className="truncate font-semibold text-slate-950">{topup.resellerName}</div>
-                      <div className="truncate text-xs text-slate-500">{topup.stripePaymentIntentId ?? topup.id}</div>
+                      <div className="truncate text-xs text-slate-500">{topup.stripeChargeId ?? topup.stripePaymentIntentId ?? topup.id}</div>
                     </div>
                     <div className="font-semibold text-slate-900">{formatMinor(topup.amountMinor, topup.currency)}</div>
+                    <div className="font-semibold text-red-700">{formatMinor(topup.stripeFeeMinor, topup.currency)}</div>
+                    <div className="font-semibold text-green-700">{formatMinor(topup.netAmountMinor, topup.currency)}</div>
                     <StatusBadge tone={topup.stripeMode === "live" ? "success" : "warning"}>{topup.stripeMode}</StatusBadge>
-                    <StatusBadge tone={topup.paymentStatus === "succeeded" ? "success" : topup.paymentStatus === "failed" ? "error" : "info"}>{topup.paymentStatus}</StatusBadge>
                     <div className="min-w-0">
+                      <StatusBadge tone={topup.paymentStatus === "succeeded" ? "success" : topup.paymentStatus === "failed" ? "error" : "info"}>{topup.paymentStatus}</StatusBadge>
                       <StatusBadge tone={topup.ocsStatus === "applied" ? "success" : topup.ocsStatus === "failed" ? "error" : "neutral"}>{topup.ocsStatus}</StatusBadge>
                       {topup.lastError ? <div className="mt-1 truncate text-xs text-red-600">{topup.lastError}</div> : null}
                     </div>
@@ -634,4 +727,11 @@ function minorToInput(value: number) {
 
 function formatMinor(amountMinor: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amountMinor / 100);
+}
+
+function formatBalance(value: string | number | null) {
+  if (value === null || value === undefined || value === "") return "Balance unavailable";
+  const parsed = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (!Number.isFinite(parsed)) return String(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" }).format(parsed);
 }

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { adminApiGroupOptions, adminPageOptions, type AdminApiGroup, type AdminPageKey } from "@/lib/admin/pages";
 import { getCurrentAdmin } from "@/server/auth/admin-auth";
-import { listSubresellerProfiles, upsertSubresellerProfile } from "@/server/db/subresellers";
+import { listSubresellerProfiles, syncSubresellersFromOcs, upsertSubresellerProfile } from "@/server/db/subresellers";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +32,16 @@ export async function GET() {
   const authError = await requireSuperAdmin();
   if (authError) return authError;
 
+  let ocsResellerAccounts: Awaited<ReturnType<typeof syncSubresellersFromOcs>> = [];
+  let ocsSyncError: string | null = null;
+  try {
+    ocsResellerAccounts = await syncSubresellersFromOcs();
+  } catch (error) {
+    ocsSyncError = error instanceof Error ? error.message : "Unable to sync OCS reseller accounts.";
+  }
+
   const profiles = await listSubresellerProfiles();
-  return ok({ profiles, pageOptions: adminPageOptions, apiGroupOptions: adminApiGroupOptions });
+  return ok({ profiles, ocsResellerAccounts, ocsSyncError, pageOptions: adminPageOptions, apiGroupOptions: adminApiGroupOptions });
 }
 
 export async function POST(request: NextRequest) {

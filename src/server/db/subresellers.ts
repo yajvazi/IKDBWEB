@@ -2,6 +2,8 @@ import "server-only";
 
 import { getDb } from "@/server/db/client";
 import type { AdminApiGroup, AdminPageKey } from "@/lib/admin/pages";
+import { listResellerAccountCommand } from "@/server/ocs/commands";
+import { getOcsClient } from "@/server/ocs/client";
 
 export type SubresellerProfile = {
   id: string;
@@ -21,8 +23,26 @@ export type SubresellerProfile = {
   canIssueRefunds: boolean;
   canRevealEsimSecrets: boolean;
   notes: string | null;
+  topupCount: number;
+  topupGrossMinor: number;
+  topupStripeFeeMinor: number;
+  topupNetCreditedMinor: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type OcsResellerAccount = {
+  localResellerId: string | null;
+  ocsResellerId: number;
+  name: string;
+  balance: string | number | null;
+  accounts: Array<{
+    localAccountId: string | null;
+    ocsAccountId: number;
+    name: string | null;
+    balance: string | number | null;
+    packageOnly: boolean;
+  }>;
 };
 
 export type SubresellerInput = {
@@ -68,14 +88,87 @@ export async function listSubresellerProfiles(): Promise<SubresellerProfile[]> {
       a.can_view_costs,
       a.can_issue_refunds,
       a.can_reveal_esim_secrets,
-      a.active as access_active
+      a.active as access_active,
+      coalesce(t.topup_count, 0)::int as topup_count,
+      coalesce(t.topup_gross_minor, 0)::int as topup_gross_minor,
+      coalesce(t.topup_stripe_fee_minor, 0)::int as topup_stripe_fee_minor,
+      coalesce(t.topup_net_credited_minor, 0)::int as topup_net_credited_minor
     from resellers r
     left join reseller_api_profiles p on p.reseller_id = r.id and p.name = 'default'
     left join reseller_admin_access_policies a on a.reseller_id = r.id
+    left join lateral (
+      select
+        count(*) filter (where payment_status = 'succeeded') as topup_count,
+        sum(amount_minor) filter (where payment_status = 'succeeded') as topup_gross_minor,
+        sum(stripe_fee_minor) filter (where payment_status = 'succeeded') as topup_stripe_fee_minor,
+        sum(net_amount_minor) filter (where ocs_status = 'applied') as topup_net_credited_minor
+      from subreseller_topups
+      where reseller_id = r.id
+    ) t on true
     order by r.created_at desc
   `;
 
   return rows.map(subresellerFromRow);
+}
+
+export async function syncSubresellersFromOcs(): Promise<OcsResellerAccount[]> {
+  const response = await getOcsClient().executeCommand(listResellerAccountCommand());
+  const ocsResellers = normalizeOcsResellerAccounts(response);
+  const db = getDb();
+  if (!db) return ocsResellers;
+
+  const synced: OcsResellerAccount[] = [];
+
+  for (const reseller of ocsResellers) {
+    const defaultAccount = reseller.accounts[0] ?? null;
+    const [localReseller] = await db`
+      insert into resellers (name, ocs_reseller_id, default_ocs_account_id, stripe_profile_id, active, config)
+      values (
+        ${reseller.name},
+        ${reseller.ocsResellerId},
+        ${defaultAccount?.ocsAccountId ?? null},
+        'internetkudo-platform',
+        true,
+        ${JSON.stringify({ source: "ocs_listResellerAccount", lastOcsSyncAt: new Date().toISOString() })}::jsonb
+      )
+      on conflict (ocs_reseller_id) do update set
+        name = excluded.name,
+        default_ocs_account_id = coalesce(resellers.default_ocs_account_id, excluded.default_ocs_account_id),
+        config = coalesce(resellers.config, '{}'::jsonb) || excluded.config,
+        updated_at = now()
+      returning id::text
+    `;
+
+    const accounts = [];
+    for (const account of reseller.accounts) {
+      const [localAccount] = await db`
+        insert into reseller_accounts (reseller_id, ocs_account_id, name, balance, active, raw_payload, last_synced_at)
+        values (
+          ${localReseller.id},
+          ${account.ocsAccountId},
+          ${account.name},
+          ${parseDecimal(account.balance)},
+          true,
+          ${JSON.stringify(account)}::jsonb,
+          now()
+        )
+        on conflict (reseller_id, ocs_account_id) do update set
+          name = excluded.name,
+          balance = excluded.balance,
+          active = true,
+          raw_payload = excluded.raw_payload,
+          last_synced_at = now(),
+          updated_at = now()
+        returning id::text
+      `;
+
+      accounts.push({ ...account, localAccountId: String(localAccount.id) });
+    }
+
+    synced.push({ ...reseller, localResellerId: String(localReseller.id), accounts });
+  }
+
+  return synced;
 }
 
 export async function getAdminAccessPolicy(email: string) {
@@ -302,6 +395,10 @@ function subresellerFromRow(row: Record<string, unknown>): SubresellerProfile {
     canIssueRefunds: Boolean(row.can_issue_refunds),
     canRevealEsimSecrets: Boolean(row.can_reveal_esim_secrets),
     notes: nullableString(config.notes),
+    topupCount: Number(row.topup_count ?? 0),
+    topupGrossMinor: Number(row.topup_gross_minor ?? 0),
+    topupStripeFeeMinor: Number(row.topup_stripe_fee_minor ?? 0),
+    topupNetCreditedMinor: Number(row.topup_net_credited_minor ?? 0),
     createdAt: new Date(String(row.created_at)).toISOString(),
     updatedAt: new Date(String(row.updated_at)).toISOString(),
   };
@@ -322,4 +419,48 @@ function stringArray(value: unknown): string[] {
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizeOcsResellerAccounts(response: Record<string, unknown>): OcsResellerAccount[] {
+  const root = response.listResellerAccount;
+  const resellers = root && typeof root === "object" && Array.isArray((root as { reseller?: unknown }).reseller)
+    ? (root as { reseller: unknown[] }).reseller
+    : [];
+
+  return resellers.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const ocsResellerId = Number(record.id);
+    if (!Number.isFinite(ocsResellerId) || ocsResellerId <= 0) return [];
+
+    const rawAccounts = Array.isArray(record.account) ? record.account : [];
+    return [{
+      localResellerId: null,
+      ocsResellerId,
+      name: String(record.name ?? `OCS Reseller ${ocsResellerId}`),
+      balance: stringOrNumber(record.resellerBalance ?? record.balance),
+      accounts: rawAccounts.flatMap((account) => {
+        if (!account || typeof account !== "object") return [];
+        const accountRecord = account as Record<string, unknown>;
+        const ocsAccountId = Number(accountRecord.id);
+        if (!Number.isFinite(ocsAccountId) || ocsAccountId <= 0) return [];
+        return [{
+          localAccountId: null,
+          ocsAccountId,
+          name: nullableString(accountRecord.name),
+          balance: stringOrNumber(accountRecord.balance),
+          packageOnly: Boolean(accountRecord.packageOnly),
+        }];
+      }),
+    }];
+  });
+}
+
+function stringOrNumber(value: unknown): string | number | null {
+  return typeof value === "string" || typeof value === "number" ? value : null;
+}
+
+function parseDecimal(value: unknown) {
+  const parsed = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
 }

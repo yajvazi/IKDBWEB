@@ -19,9 +19,13 @@ export type SubresellerTopup = {
   resellerName: string;
   ocsResellerId: number;
   amountMinor: number;
+  stripeFeeMinor: number;
+  netAmountMinor: number;
   currency: string;
   stripeMode: StripeRuntimeMode;
   stripePaymentIntentId: string | null;
+  stripeChargeId: string | null;
+  stripeBalanceTransactionId: string | null;
   paymentStatus: string;
   ocsStatus: string;
   lastError: string | null;
@@ -110,6 +114,7 @@ export async function createSubresellerTopupPaymentIntent(input: {
       reseller_id,
       ocs_reseller_id,
       amount_minor,
+      net_amount_minor,
       currency,
       stripe_mode,
       payment_status,
@@ -120,6 +125,7 @@ export async function createSubresellerTopupPaymentIntent(input: {
     values (
       ${input.resellerId},
       ${Number(profile.ocs_reseller_id)},
+      ${input.amountMinor},
       ${input.amountMinor},
       ${settings.currency},
       ${settings.stripeMode},
@@ -237,13 +243,37 @@ export async function applyPaidSubresellerTopup(topupId: string, input: {
   `;
 
   try {
-    const amount = Number((Number(topup.amount_minor) / 100).toFixed(2));
+    const settlement = await resolveStripeSettlement({
+      paymentIntentId: String(topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? ""),
+      mode: topup.stripe_mode === "test" ? "test" : "live",
+      fallbackGrossMinor: Number(topup.amount_minor),
+    });
+    if (settlement.netAmountMinor <= 0) {
+      throw new Error("Stripe fee is greater than or equal to the paid amount; no positive OCS credit can be applied.");
+    }
+
+    await db`
+      update subreseller_topups
+      set stripe_fee_minor = ${settlement.stripeFeeMinor},
+          net_amount_minor = ${settlement.netAmountMinor},
+          stripe_charge_id = ${settlement.stripeChargeId},
+          stripe_balance_transaction_id = ${settlement.stripeBalanceTransactionId},
+          metadata = coalesce(metadata, '{}'::jsonb) || ${JSON.stringify({
+            grossAmountMinor: settlement.grossAmountMinor,
+            stripeFeeMinor: settlement.stripeFeeMinor,
+            netAmountMinor: settlement.netAmountMinor,
+          })}::jsonb,
+          updated_at = now()
+      where id = ${topupId}
+    `;
+
+    const amount = Number((settlement.netAmountMinor / 100).toFixed(2));
     const response = await getOcsClient().executeCommand(modifyResellerBalanceCommand({
       resellerId: Number(topup.ocs_reseller_id),
       type: "Stripe",
       amount,
       setBalance: false,
-      description: `InternetKudo Stripe top-up ${topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? topupId}`,
+      description: `InternetKudo Stripe top-up ${topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? topupId}; gross ${formatMinor(settlement.grossAmountMinor, String(topup.currency))}; Stripe fee ${formatMinor(settlement.stripeFeeMinor, String(topup.currency))}; net ${formatMinor(settlement.netAmountMinor, String(topup.currency))}`,
     }));
 
     await db.begin(async (tx) => {
@@ -264,7 +294,7 @@ export async function applyPaidSubresellerTopup(topupId: string, input: {
           'credit',
           'stripe_topup',
           ${topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? topupId},
-          ${JSON.stringify(redactOcsPayload({ response, requestId: input.requestId, source: input.source }))}::jsonb
+          ${JSON.stringify(redactOcsPayload({ response, requestId: input.requestId, source: input.source, settlement }))}::jsonb
         )
       `;
 
@@ -322,9 +352,13 @@ function topupFromRow(row: Record<string, unknown>): SubresellerTopup {
     resellerName: String(row.reseller_name ?? "Subreseller"),
     ocsResellerId: Number(row.ocs_reseller_id),
     amountMinor: Number(row.amount_minor),
+    stripeFeeMinor: Number(row.stripe_fee_minor ?? 0),
+    netAmountMinor: Number(row.net_amount_minor ?? row.amount_minor ?? 0),
     currency: String(row.currency ?? "EUR"),
     stripeMode: row.stripe_mode === "test" ? "test" : "live",
     stripePaymentIntentId: nullableString(row.stripe_payment_intent_id),
+    stripeChargeId: nullableString(row.stripe_charge_id),
+    stripeBalanceTransactionId: nullableString(row.stripe_balance_transaction_id),
     paymentStatus: String(row.payment_status),
     ocsStatus: String(row.ocs_status),
     lastError: nullableString(row.last_error),
@@ -349,4 +383,50 @@ function paymentStatusForIntent(status: Stripe.PaymentIntent.Status) {
   if (status === "canceled") return "canceled";
   if (status === "processing") return "processing";
   return "requires_payment";
+}
+
+async function resolveStripeSettlement(input: {
+  paymentIntentId: string;
+  mode: StripeRuntimeMode;
+  fallbackGrossMinor: number;
+}) {
+  if (!input.paymentIntentId) throw new Error("Stripe PaymentIntent ID is missing for this top-up.");
+
+  const stripe = getStripeClient(input.mode);
+  const paymentIntent = await stripe.paymentIntents.retrieve(input.paymentIntentId, {
+    expand: ["latest_charge.balance_transaction"],
+  });
+  const charge = await resolveLatestCharge(stripe, paymentIntent);
+  const balanceTransaction = await resolveBalanceTransaction(stripe, charge);
+  const stripeFeeMinor = Number(balanceTransaction.fee);
+  const grossAmountMinor = Number(paymentIntent.amount_received || charge.amount_captured || input.fallbackGrossMinor);
+
+  if (!Number.isFinite(stripeFeeMinor)) throw new Error("Stripe fee is not available yet for this payment.");
+  if (!Number.isFinite(grossAmountMinor) || grossAmountMinor <= 0) throw new Error("Stripe gross amount is not available for this payment.");
+
+  return {
+    grossAmountMinor,
+    stripeFeeMinor,
+    netAmountMinor: Math.max(grossAmountMinor - stripeFeeMinor, 0),
+    stripeChargeId: charge.id,
+    stripeBalanceTransactionId: balanceTransaction.id,
+  };
+}
+
+async function resolveLatestCharge(stripe: Stripe, paymentIntent: Stripe.PaymentIntent) {
+  const latestCharge = paymentIntent.latest_charge;
+  if (!latestCharge) throw new Error("Stripe charge is not available yet for this top-up.");
+  if (typeof latestCharge === "string") {
+    return stripe.charges.retrieve(latestCharge, { expand: ["balance_transaction"] });
+  }
+  return latestCharge;
+}
+
+async function resolveBalanceTransaction(stripe: Stripe, charge: Stripe.Charge) {
+  const balanceTransaction = charge.balance_transaction;
+  if (!balanceTransaction) throw new Error("Stripe balance transaction is not available yet for this charge.");
+  if (typeof balanceTransaction === "string") {
+    return stripe.balanceTransactions.retrieve(balanceTransaction);
+  }
+  return balanceTransaction;
 }
