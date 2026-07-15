@@ -7,7 +7,6 @@ import { showToast } from "@/lib/toastify";
 import {
   internetKudoApiEndpoints,
   internetKudoTryPath,
-  isInternetKudoApiEndpointLive,
   isInternetKudoApiEndpointSafeToTry,
   sampleBodyForInternetKudoEndpoint,
 } from "@/lib/internetkudo-api/endpoints";
@@ -115,8 +114,7 @@ const endpoints: Endpoint[] = [
   })),
 ];
 
-const liveDocsPaths = new Set(internetKudoApiEndpoints.filter(isInternetKudoApiEndpointLive).map((endpoint) => internetKudoTryPath(endpoint.path)));
-const docsEndpoints = endpoints.filter((endpoint) => endpoint.group.startsWith("InternetKudo -") && liveDocsPaths.has(endpoint.path));
+const docsEndpoints = endpoints.filter((endpoint) => endpoint.group.startsWith("InternetKudo -"));
 const defaultEndpoint = docsEndpoints[0] ?? endpoints[0];
 const groups = Array.from(new Set(docsEndpoints.map((endpoint) => endpoint.group)));
 
@@ -195,7 +193,7 @@ export default function ApiDocsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold tracking-tight text-slate-950">Swagger Docs</h1>
-        <p className="mt-1 text-sm text-slate-500">OpenAPI 3.1 documentation and safe try-it-out for live InternetKudo API Gateway routes only.</p>
+        <p className="mt-1 text-sm text-slate-500">Full InternetKudo API contract rebuilt from the Ring eSIM Swagger shape, with live-route status shown per endpoint.</p>
       </div>
 
       <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">

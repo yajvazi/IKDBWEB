@@ -1,8 +1,8 @@
 import { ocsCommandCatalog } from "@/lib/ocs/catalog";
-import { internetKudoApiEndpoints, isInternetKudoApiEndpointLive, toInternetKudoPath } from "@/lib/internetkudo-api/endpoints";
+import { internetKudoApiEndpoints, isInternetKudoApiEndpointSafeToTry, toInternetKudoPath } from "@/lib/internetkudo-api/endpoints";
 
 export function getOpenApiSpec() {
-  const internetKudoApiTags = Array.from(new Set(internetKudoApiEndpoints.filter(isInternetKudoApiEndpointLive).map((endpoint) => `InternetKudo - ${endpoint.tag}`)));
+  const internetKudoApiTags = Array.from(new Set(internetKudoApiEndpoints.map((endpoint) => `InternetKudo - ${endpoint.tag}`)));
 
   const spec = {
     openapi: "3.1.0",
@@ -378,14 +378,16 @@ export function getOpenApiSpec() {
 }
 
 function internetKudoOpenApiPaths() {
-  return internetKudoApiEndpoints.filter(isInternetKudoApiEndpointLive).reduce<Record<string, Record<string, unknown>>>((paths, endpoint) => {
+  return internetKudoApiEndpoints.reduce<Record<string, Record<string, unknown>>>((paths, endpoint) => {
     const path = toInternetKudoPath(endpoint.path);
     paths[path] ??= {};
     paths[path][endpoint.method.toLowerCase()] = {
       tags: [`InternetKudo - ${endpoint.tag}`],
       operationId: endpoint.operationId,
       summary: endpoint.summary,
-      description: "InternetKudo API Gateway route. The route is served under /api/v1 and normalized by InternetKudo; raw OCS credentials are never exposed.",
+      description: isInternetKudoApiEndpointSafeToTry(endpoint)
+        ? "Live InternetKudo API Gateway route. The route is served under /api/v1 and normalized by InternetKudo; raw OCS credentials are never exposed."
+        : "InternetKudo API contract route. This route is documented for the mobile app, website, or future subreseller platform, but needs the matching production adapter before it can return live business data.",
       security: [{ bearerAuth: [] }],
       parameters: pathParameters(path),
       ...(endpoint.method === "POST" || endpoint.method === "PATCH" ? {
