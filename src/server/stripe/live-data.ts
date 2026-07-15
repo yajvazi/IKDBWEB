@@ -286,7 +286,7 @@ function paymentIntentToRecord(paymentIntent: Stripe.PaymentIntent): AdminRecord
       order: paymentIntent.metadata?.orderId ?? "not linked",
       customer: typeof paymentIntent.customer === "string" ? paymentIntent.customer : "n/a",
       amount: formatMinor(paymentIntent.amount, paymentIntent.currency),
-      currency: paymentIntent.currency.toUpperCase(),
+      currency: safeCurrencyLabel(paymentIntent.currency),
       method: normalizeMethod(method),
       stripeFee: "pending balance transaction",
       refundAmount,
@@ -406,9 +406,15 @@ function normalizeMethod(method: string) {
     .join(" ");
 }
 
-function formatMinor(amount: number, currency = "eur") {
-  if (currency.toLowerCase() === "eur") return eur.format(amount / 100);
-  return `${currency.toUpperCase()} ${(amount / 100).toFixed(2)}`;
+function formatMinor(amount: number | null | undefined, currency: string | null | undefined = "eur") {
+  const safeAmount = Number(amount ?? 0);
+  const safeCurrency = typeof currency === "string" && currency.trim() ? currency.toLowerCase() : "eur";
+  if (safeCurrency === "eur") return eur.format(safeAmount / 100);
+  return `${safeCurrency.toUpperCase()} ${(safeAmount / 100).toFixed(2)}`;
+}
+
+function safeCurrencyLabel(currency: string | null | undefined) {
+  return typeof currency === "string" && currency.trim() ? currency.toUpperCase() : "EUR";
 }
 
 function safeError(error: unknown) {

@@ -30,8 +30,23 @@ export async function syncStripeCache(resources: SyncResource[] = ["payment_inte
   const db = getDb();
   if (!db) return;
 
-  const stripe = getStripeClient();
-  await Promise.all(resources.map((resource) => syncResource(resource, stripe)));
+  let stripe: Stripe;
+  try {
+    stripe = getStripeClient();
+  } catch (error) {
+    console.warn("Stripe cache sync skipped; rendering cached data.", {
+      message: error instanceof Error ? error.message : "Unable to initialize Stripe client.",
+    });
+    return;
+  }
+
+  const results = await Promise.allSettled(resources.map((resource) => syncResource(resource, stripe)));
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    console.warn("Stripe cache sync completed with partial failures; rendering cached data.", {
+      failedResources: failures.length,
+    });
+  }
 }
 
 export async function getCachedPaymentIntents(options: { sync?: boolean } = {}) {
@@ -40,12 +55,13 @@ export async function getCachedPaymentIntents(options: { sync?: boolean } = {}) 
   if (!db) return [] as Stripe.PaymentIntent[];
 
   const rows = await db`
-    select raw
+    select id, amount, amount_received, currency, status, customer_id, receipt_email,
+      description, latest_charge_id, metadata, raw, livemode, created
     from stripe_payment_intents_cache
     order by created desc, id desc
   `;
 
-  return rows.map((row) => row.raw as Stripe.PaymentIntent);
+  return rows.map(paymentIntentFromCacheRow);
 }
 
 export async function getCachedCharges(options: { sync?: boolean } = {}) {
@@ -54,12 +70,14 @@ export async function getCachedCharges(options: { sync?: boolean } = {}) {
   if (!db) return [] as Stripe.Charge[];
 
   const rows = await db`
-    select raw
+    select id, amount, amount_refunded, currency, status, paid, refunded,
+      payment_intent_id, customer_id, balance_transaction_id, payment_method_type,
+      raw, livemode, created
     from stripe_charges_cache
     order by created desc, id desc
   `;
 
-  return rows.map((row) => row.raw as Stripe.Charge);
+  return rows.map(chargeFromCacheRow);
 }
 
 export async function getCachedCustomers(options: { sync?: boolean } = {}) {
@@ -68,12 +86,12 @@ export async function getCachedCustomers(options: { sync?: boolean } = {}) {
   if (!db) return [] as Stripe.Customer[];
 
   const rows = await db`
-    select raw
+    select id, email, name, phone, delinquent, metadata, raw, livemode, created
     from stripe_customers_cache
     order by created desc, id desc
   `;
 
-  return rows.map((row) => row.raw as Stripe.Customer);
+  return rows.map(customerFromCacheRow);
 }
 
 export async function getStripeCacheStatus(): Promise<StripeCacheStatus> {
@@ -425,4 +443,108 @@ function balanceAmounts(value: unknown): Array<{ amount: number; currency: strin
       return Number.isFinite(amount) ? { amount, currency } : null;
     })
     .filter((item): item is { amount: number; currency: string } => Boolean(item));
+}
+
+function paymentIntentFromCacheRow(row: Record<string, unknown>): Stripe.PaymentIntent {
+  const raw = parsedStripeRaw<Partial<Stripe.PaymentIntent>>(row.raw);
+  return {
+    ...raw,
+    id: stringValue(row.id, raw.id),
+    object: "payment_intent",
+    amount: numberValue(row.amount, raw.amount),
+    amount_received: numberValue(row.amount_received, raw.amount_received),
+    currency: stringValue(row.currency, raw.currency, "eur"),
+    status: stringValue(row.status, raw.status, "requires_payment_method") as Stripe.PaymentIntent.Status,
+    customer: stringValue(row.customer_id) || raw.customer || null,
+    receipt_email: stringValue(row.receipt_email) || raw.receipt_email || null,
+    description: stringValue(row.description) || raw.description || null,
+    latest_charge: stringValue(row.latest_charge_id) || raw.latest_charge || null,
+    metadata: objectValue(row.metadata, raw.metadata),
+    livemode: booleanValue(row.livemode, raw.livemode),
+    created: numberValue(row.created, raw.created),
+  } as Stripe.PaymentIntent;
+}
+
+function chargeFromCacheRow(row: Record<string, unknown>): Stripe.Charge {
+  const raw = parsedStripeRaw<Partial<Stripe.Charge>>(row.raw);
+  return {
+    ...raw,
+    id: stringValue(row.id, raw.id),
+    object: "charge",
+    amount: numberValue(row.amount, raw.amount),
+    amount_refunded: numberValue(row.amount_refunded, raw.amount_refunded),
+    currency: stringValue(row.currency, raw.currency, "eur"),
+    status: stringValue(row.status, raw.status, "succeeded") as Stripe.Charge.Status,
+    paid: booleanValue(row.paid, raw.paid),
+    refunded: booleanValue(row.refunded, raw.refunded),
+    payment_intent: stringValue(row.payment_intent_id) || raw.payment_intent || null,
+    customer: stringValue(row.customer_id) || raw.customer || null,
+    balance_transaction: stringValue(row.balance_transaction_id) || raw.balance_transaction || null,
+    payment_method_details: {
+      ...raw.payment_method_details,
+      type: stringValue(row.payment_method_type, raw.payment_method_details?.type, "card"),
+    },
+    livemode: booleanValue(row.livemode, raw.livemode),
+    created: numberValue(row.created, raw.created),
+  } as Stripe.Charge;
+}
+
+function customerFromCacheRow(row: Record<string, unknown>): Stripe.Customer {
+  const raw = parsedStripeRaw<Partial<Stripe.Customer>>(row.raw);
+  return {
+    ...raw,
+    id: stringValue(row.id, raw.id),
+    object: "customer",
+    email: stringValue(row.email) || raw.email || null,
+    name: stringValue(row.name) || raw.name || null,
+    phone: stringValue(row.phone) || raw.phone || null,
+    delinquent: booleanValue(row.delinquent, raw.delinquent),
+    metadata: objectValue(row.metadata, raw.metadata),
+    livemode: booleanValue(row.livemode, raw.livemode),
+    created: numberValue(row.created, raw.created),
+  } as Stripe.Customer;
+}
+
+function parsedStripeRaw<T extends Record<string, unknown>>(value: unknown): T {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as T;
+  if (typeof value !== "string") return {} as T;
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as T;
+    if (typeof parsed === "string") return parsedStripeRaw<T>(parsed);
+  } catch {
+    return {} as T;
+  }
+
+  return {} as T;
+}
+
+function stringValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function numberValue(...values: unknown[]) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return 0;
+}
+
+function booleanValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+  }
+  return false;
+}
+
+function objectValue(...values: unknown[]) {
+  for (const value of values) {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as Stripe.Metadata;
+  }
+  return {};
 }
