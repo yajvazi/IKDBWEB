@@ -12,6 +12,7 @@ import {
 } from "@/components/charts/dashboard-charts";
 import { requireAdminPageAccess } from "@/server/auth/admin-access";
 import { SubresellerTopupWidget } from "@/components/admin/subreseller-topup-widget";
+import { SubresellerStripeConnectCard } from "@/components/admin/subreseller-stripe-connect-card";
 
 function Card({ title, action, children, className = "" }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
@@ -29,7 +30,42 @@ export const revalidate = 300;
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  await requireAdminPageAccess("dashboard");
+  const { admin, policy } = await requireAdminPageAccess("dashboard");
+
+  if (admin.role !== "super_admin") {
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-950">Subreseller Dashboard</h1>
+            <p className="mt-1 text-sm text-slate-500">Your OCS reseller balance, top-ups, and connected Stripe account.</p>
+          </div>
+          <DashboardActionBar />
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <div className="rounded-lg border border-border bg-white p-4 shadow-sm">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Linked reseller</div>
+            <div className="mt-2 text-2xl font-bold text-slate-950">{policy?.resellerName ?? "Not configured"}</div>
+            <div className="mt-1 text-sm text-slate-500">OCS reseller ID {policy?.ocsResellerId ?? "-"} · Account {policy?.ocsAccountId ?? "-"}</div>
+          </div>
+          <div className="rounded-lg border border-border bg-white p-4 shadow-sm">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Dashboard scope</div>
+            <div className="mt-2 text-2xl font-bold text-green-700">Subreseller</div>
+            <div className="mt-1 text-sm text-slate-500">Platform Stripe numbers are hidden for this role.</div>
+          </div>
+          <div className="rounded-lg border border-border bg-white p-4 shadow-sm">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Stripe account</div>
+            <div className="mt-2 text-2xl font-bold text-slate-950">{policy?.stripeAccountId ? "Connected" : "Not connected"}</div>
+            <div className="mt-1 text-sm text-slate-500">Use the Stripe card below to connect or finish setup.</div>
+          </div>
+        </div>
+
+        <SubresellerTopupWidget variant="dashboard" />
+        <SubresellerStripeConnectCard />
+      </div>
+    );
+  }
 
   const kpis = await getDashboardKpis();
   const analytics = await getDashboardAnalytics();

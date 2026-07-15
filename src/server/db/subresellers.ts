@@ -221,6 +221,46 @@ export async function getAdminAccessPolicy(email: string) {
   };
 }
 
+export async function updateSubresellerStripeAccount(input: {
+  resellerId: string;
+  stripeAccountId: string;
+  stripeProfileId?: string | null;
+}) {
+  const db = getDb();
+  if (!db) throw new Error("DATABASE_URL is not configured.");
+
+  const stripeAccountId = input.stripeAccountId.trim();
+  if (!stripeAccountId) throw new Error("Stripe account ID is required.");
+
+  const stripeProfileId = input.stripeProfileId?.trim() || "internetkudo-connect";
+
+  await db.begin(async (tx) => {
+    await tx`
+      update resellers
+      set stripe_account_id = ${stripeAccountId},
+          stripe_profile_id = ${stripeProfileId},
+          config = coalesce(config, '{}'::jsonb) || ${JSON.stringify({
+            stripeConnectedAt: new Date().toISOString(),
+            stripeConnectionType: "connect",
+          })}::jsonb,
+          updated_at = now()
+      where id = ${input.resellerId}
+    `;
+
+    await tx`
+      update reseller_api_profiles
+      set stripe_profile_id = ${stripeProfileId},
+          config = coalesce(config, '{}'::jsonb) || ${JSON.stringify({
+            stripeAccountId,
+            stripeConnectedAt: new Date().toISOString(),
+          })}::jsonb,
+          updated_at = now()
+      where reseller_id = ${input.resellerId}
+        and name = 'default'
+    `;
+  });
+}
+
 export async function upsertSubresellerProfile(input: SubresellerInput): Promise<SubresellerProfile> {
   const db = getDb();
   if (!db) throw new Error("DATABASE_URL is not configured.");
