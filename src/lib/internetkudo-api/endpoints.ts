@@ -1,14 +1,14 @@
-export type RingCompatMethod = "GET" | "POST" | "PATCH" | "DELETE";
+export type InternetKudoApiMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
-export type RingCompatEndpoint = {
-  method: RingCompatMethod;
+export type InternetKudoApiEndpoint = {
+  method: InternetKudoApiMethod;
   path: string;
   tag: string;
   operationId: string;
   summary: string;
 };
 
-export const ringCompatEndpoints: RingCompatEndpoint[] = [
+export const internetKudoApiEndpoints: InternetKudoApiEndpoint[] = [
   ["GET", "/api", "App", "AppController_getHello", "Root API status"],
   ["GET", "/api/health", "App", "AppController_health", "Health check"],
   ["POST", "/api/users", "Users", "UsersController_register", "Register user"],
@@ -137,19 +137,19 @@ export const ringCompatEndpoints: RingCompatEndpoint[] = [
   ["POST", "/api/reseller-orders/{id}/refund", "Reseller Orders", "ResellerOrdersController_refundOrder", "Refund reseller order"],
   ["GET", "/api/packages", "Packages", "ResellerPackagesController_listPackages", "List reseller packages"],
   ["PATCH", "/api/packages/{templateId}/visibility", "Packages", "ResellerPackagesController_setVisibility", "Set package visibility"],
-].map(([method, path, tag, operationId, summary]) => ({ method, path, tag, operationId, summary })) as RingCompatEndpoint[];
+].map(([method, path, tag, operationId, summary]) => ({ method, path, tag, operationId, summary })) as InternetKudoApiEndpoint[];
 
-export function toInternetKudoPath(ringPath: string) {
-  return ringPath.replace(/^\/api\/?/, "/");
+export function toInternetKudoPath(apiPath: string) {
+  return apiPath.replace(/^\/api\/?/, "/");
 }
 
-export function ringDocsPath(ringPath: string) {
-  return `/api/v1${toInternetKudoPath(ringPath)}`;
+export function internetKudoDocsPath(apiPath: string) {
+  return `/api/v1${toInternetKudoPath(apiPath)}`;
 }
 
-export function matchRingCompatEndpoint(method: string, pathWithoutApiV1: string) {
+export function matchInternetKudoApiEndpoint(method: string, pathWithoutApiV1: string) {
   const normalizedPath = `/${pathWithoutApiV1}`.replace(/\/+$/, "") || "/";
-  return ringCompatEndpoints.find((endpoint) => {
+  return internetKudoApiEndpoints.find((endpoint) => {
     if (endpoint.method !== method.toUpperCase()) return false;
     const template = toInternetKudoPath(endpoint.path).replace(/\/+$/, "") || "/";
     const templateParts = template.split("/").filter(Boolean);
@@ -159,7 +159,7 @@ export function matchRingCompatEndpoint(method: string, pathWithoutApiV1: string
   });
 }
 
-export function sampleBodyForRingEndpoint(endpoint: RingCompatEndpoint) {
+export function sampleBodyForInternetKudoEndpoint(endpoint: InternetKudoApiEndpoint) {
   if (endpoint.method === "GET" || endpoint.method === "DELETE") return undefined;
   if (endpoint.path.includes("auth/login")) return { email: "customer@example.com", password: "Password123!" };
   if (endpoint.path.includes("payments/create-intent")) return { amount: 1499, currency: "EUR", orderId: "ord_demo" };
