@@ -20,6 +20,34 @@ export function getResellerInfoCommand(input: { id?: number } = {}) {
   return ocsCommand("getResellerInfo", input);
 }
 
+export function esimStatusPerAccountCommand(input: { accountId?: number; resellerId?: number }) {
+  return ocsCommand("esimStatusPerAccount", input);
+}
+
+export function listSponsorCommand(resellerId: number) {
+  return ocsCommand("listSponsor", resellerId);
+}
+
+export function listSteeringListCommand(resellerId: number) {
+  return ocsCommand("listSteeringList", resellerId);
+}
+
+export function listResellerTariffCommand(input: { resellerId?: number } = {}) {
+  return ocsCommand("listResellerTariff", input);
+}
+
+export function listSubscriberTariffCommand(input: { resellerId?: number } = {}) {
+  return ocsCommand("listSubscriberTariff", input);
+}
+
+export function listTariffRuleCommand(tariffId: number) {
+  return ocsCommand("listTariffRule", tariffId);
+}
+
+export function getCustomerTariffCommand(resellerId: number) {
+  return ocsCommand("getCustomerTariff", resellerId);
+}
+
 export function listNetworkProfileCommand(input: { resellerId?: number; sponsorId?: number } = {}) {
   return ocsCommand("listNetworkProfile", input);
 }

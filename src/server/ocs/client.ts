@@ -189,6 +189,109 @@ function mockCommandResponse(command: Record<string, unknown>): Record<string, u
     };
   }
 
+  if (commandName === "esimStatusPerAccount") {
+    return {
+      status: { code: 0, msg: "OK" },
+      esimStatusPerAccount: {
+        account: [
+          {
+            id: 3926,
+            name: "InternetKudo Main Account",
+            sponsor: [
+              {
+                id: 101,
+                name: "InternetKudo Sponsor",
+                esim: {
+                  status: [
+                    { statusNum: 0, statusStr: "Free", count: 120 },
+                    { statusNum: 2, statusStr: "Affected", count: 38 },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  if (commandName === "listSponsor") {
+    return {
+      status: { code: 0, msg: "OK" },
+      listSponsor: {
+        sponsor: [
+          { id: 101, prefix: 24801, name: "InternetKudo Sponsor" },
+          { id: 102, prefix: 24802, name: "InternetKudo Backup Sponsor" },
+        ],
+      },
+    };
+  }
+
+  if (commandName === "listSteeringList") {
+    return {
+      status: { code: 0, msg: "OK" },
+      listSteeringList: [
+        { id: 1, resellerId: 567, name: "InternetKudo Default Steering" },
+        { id: 2, resellerId: 567, name: "InternetKudo EU Steering" },
+      ],
+    };
+  }
+
+  if (commandName === "listResellerTariff" || commandName === "listSubscriberTariff") {
+    const tariffType = commandName === "listResellerTariff" ? "RESELLER" : "SUBSCRIBER";
+    return {
+      status: { code: 0, msg: "OK" },
+      [commandName]: {
+        tariff: [
+          {
+            resellers: { resellerid: 567, resellername: "InternetKudo" },
+            roamingplanid: tariffType === "RESELLER" ? 1 : 4,
+            roamingplanname: `InternetKudo ${tariffType === "RESELLER" ? "Reseller" : "Subscriber"} Tariff`,
+            defaultoutgoingvoice: 0,
+            defaultterminatedvoice: 0,
+            defaulttext: 0,
+            defaultdata: tariffType === "RESELLER" ? 0.004 : 0.006,
+            resellerid: 567,
+            defaultmtsms: 0,
+            currencyid: 1,
+            isusedefaultprices: false,
+            tariffType,
+          },
+        ],
+      },
+    };
+  }
+
+  if (commandName === "listTariffRule" || commandName === "getCustomerTariff") {
+    return {
+      status: { code: 0, msg: "OK" },
+      listTariffRule: {
+        rule: [
+          {
+            operator: { networkId: 79, continent: "Europe", countryName: "Belgium", countryIso2: "be", operatorName: "Proximus PLC" },
+            roamingplanruleid: 7198,
+            roamingplanid: 1,
+            active: true,
+            datarate: 0.004,
+            currencyid: 1,
+            hidden: false,
+            dailyCap: false,
+          },
+          {
+            operator: { networkId: 477, continent: "Europe", countryName: "Italy", countryIso2: "it", operatorName: "H3G" },
+            roamingplanruleid: 4,
+            roamingplanid: 1,
+            active: true,
+            datarate: 0.005,
+            currencyid: 1,
+            hidden: false,
+            dailyCap: false,
+          },
+        ],
+      },
+    };
+  }
+
   if (commandName === "listDetailedLocationZone") {
     return {
       status: { code: 0, msg: "OK" },
