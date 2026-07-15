@@ -492,6 +492,8 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   const [liveStatus, setLiveStatus] = useState("");
   const [overview, setOverview] = useState<OcsOverview | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(false);
+  const [loadingPackageTemplates, setLoadingPackageTemplates] = useState(false);
+  const [packageTemplatesLoadedAt, setPackageTemplatesLoadedAt] = useState("");
   const [submittingAction, setSubmittingAction] = useState("");
   const [locationReason, setLocationReason] = useState("Create sellable InternetKudo location zone");
   const [locationConfirmation, setLocationConfirmation] = useState("");
@@ -650,8 +652,7 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       .filter((template) => {
         const label = `${templateId(template) ?? ""} ${templateDisplayName(template)} ${templateData(template)}`.toLowerCase();
         return !query || label.includes(query);
-      })
-      .slice(0, 160);
+      });
   }, [packageTemplateSearch, packageTemplates]);
   const filteredLocationZones = useMemo(() => {
     const query = locationZoneSearch.trim().toLowerCase();
@@ -681,6 +682,7 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
         if (!selectedAccountId && firstAccount?.id) setSelectedAccountId(String(firstAccount.id));
       }
       const loadedTemplates = readArray(json.data.packageTemplates, "listPrepaidPackageTemplate");
+      if (loadedTemplates.length > 0) setPackageTemplatesLoadedAt(new Date().toISOString());
       if (loadedTemplates.length > 0 && !loadedTemplates.some((template) => String(templateId(template)) === packageTemplateId)) {
         const firstTemplate = loadedTemplates[0];
         setPackageTemplateId(String(templateId(firstTemplate) ?? ""));
@@ -708,6 +710,7 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       const firstAccount = activeReseller?.account?.[0];
       setSelectedAccountId(firstAccount?.id ? String(firstAccount.id) : "");
       const loadedTemplates = readArray(json.data.packageTemplates, "listPrepaidPackageTemplate");
+      if (loadedTemplates.length > 0) setPackageTemplatesLoadedAt(new Date().toISOString());
       const firstTemplate = loadedTemplates[0];
       setPackageTemplateId(firstTemplate ? String(templateId(firstTemplate) ?? "") : "");
       setValidityPeriod(firstTemplate?.perioddays ? String(firstTemplate.perioddays) : "30");
@@ -717,6 +720,42 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       showToast(message, "error");
     } finally {
       setLoadingOverview(false);
+    }
+  }
+
+  async function loadPackageTemplatesForReseller(id = selectedResellerId, notify = true) {
+    if (!id.trim()) {
+      showToast("Select a reseller before loading package templates.", "warning");
+      return;
+    }
+
+    setLoadingPackageTemplates(true);
+    try {
+      const response = await fetch(`/api/admin/ocs/creation?resource=package-templates&resellerId=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok || !json.success) throw new Error(json.error?.message ?? "Unable to load package templates.");
+
+      const loadedTemplates = readArray(json.data.response, "listPrepaidPackageTemplate");
+      setOverview((current) => ({
+        ...(current ?? { mode: "live", resellerId: Number(id) || 0 }),
+        resellerId: Number(id) || current?.resellerId || 0,
+        packageTemplates: json.data.response,
+      }));
+
+      const selectedStillExists = loadedTemplates.some((template) => String(templateId(template)) === packageTemplateId);
+      if (!selectedStillExists) {
+        const firstTemplate = loadedTemplates[0];
+        setPackageTemplateId(firstTemplate ? String(templateId(firstTemplate) ?? "") : "");
+        if (firstTemplate?.perioddays) setValidityPeriod(String(firstTemplate.perioddays));
+      }
+
+      setPackageTemplatesLoadedAt(new Date().toISOString());
+      if (notify) showToast(`Loaded ${loadedTemplates.length} package templates for reseller ${id}.`, "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load package templates.";
+      showToast(message, "error");
+    } finally {
+      setLoadingPackageTemplates(false);
     }
   }
 
@@ -923,8 +962,25 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
           <PanelCard title="Create Package With Account" description="Uses documented OCS 3.1.7 affectPackageToSubscriber with accountForSubs." className="xl:col-span-5">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="md:col-span-2">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Package template</span>
-                <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_240px]">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Package template</span>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Pulled live with OCS <span className="font-mono">listPrepaidPackageTemplate</span> for reseller #{selectedResellerId}. {packageTemplatesLoadedAt ? `Last loaded ${new Date(packageTemplatesLoadedAt).toLocaleTimeString()}.` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadPackageTemplatesForReseller()}
+                    disabled={loadingPackageTemplates || loadingOverview}
+                  >
+                    <RefreshCw className={cn("h-4 w-4", loadingPackageTemplates && "animate-spin")} />
+                    Load templates
+                  </Button>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_260px]">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
                     <input
@@ -941,15 +997,21 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
                       const selected = packageTemplates.find((template) => String(templateId(template)) === event.target.value);
                       if (selected?.perioddays) setValidityPeriod(String(selected.perioddays));
                     }}
+                    disabled={loadingPackageTemplates}
                     className="h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
                   >
-                    <option value="">Select package</option>
+                    <option value="">{loadingPackageTemplates ? "Loading templates..." : "Select package"}</option>
                     {filteredPackageTemplates.map((template) => (
                       <option key={String(templateId(template))} value={String(templateId(template))}>
                         #{String(templateId(template))} - {templateDisplayName(template)} - {templateData(template)}
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span>{packageTemplates.length.toLocaleString()} templates loaded</span>
+                  <span>{filteredPackageTemplates.length.toLocaleString()} matching current search</span>
+                  {selectedPackageTemplate ? <span>Selected #{String(templateId(selectedPackageTemplate))}</span> : null}
                 </div>
               </div>
               <label className="block">
