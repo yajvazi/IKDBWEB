@@ -7,7 +7,6 @@ import {
   Bell,
   CalendarDays,
   ChevronDown,
-  CircleCheck,
   CircleHelp,
   LogOut,
   Menu,
@@ -210,11 +209,6 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
           ) : null}
             </div>
 
-            <StatusBadge tone="success" className="hidden gap-1 md:inline-flex">
-              <CircleCheck className="h-3 w-3" />
-              API Active
-            </StatusBadge>
-
             <div className="relative" ref={profileRef}>
           <button
             className="flex items-center gap-3 rounded-md border border-border bg-white px-2 py-1.5 shadow-sm outline-none ring-primary/20 transition hover:bg-slate-50 focus:ring-4"
@@ -257,7 +251,7 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
               </Link>
               <Link
                 role="menuitem"
-                href="/admin/help"
+                href="/admin/settings"
                 className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-primary"
                 onClick={() => setProfileOpen(false)}
               >
@@ -266,7 +260,7 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
               </Link>
               <Link
                 role="menuitem"
-                href="/admin/settings"
+                href="/admin/help"
                 className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-primary"
                 onClick={() => setProfileOpen(false)}
               >
@@ -326,8 +320,15 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
                 );
               })}
             </nav>
-            <div className="mt-auto rounded-md bg-slate-50 px-3 py-2 text-[11px] font-semibold text-green-700">
-              LIVE · v0.1.0
+            <div className="mt-auto rounded-md bg-slate-50 px-3 py-2 text-[11px] font-semibold">
+              <div className="flex items-center justify-between text-green-700">
+                <span>API Active</span>
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+              </div>
+              <div className="mt-1 flex items-center justify-between text-slate-500">
+                <span>LIVE</span>
+                <span>v0.1.0</span>
+              </div>
             </div>
             <Link
               href="/admin/help"

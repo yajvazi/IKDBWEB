@@ -7,6 +7,7 @@ import {
   Activity,
   BarChart3,
   BookOpen,
+  CircleCheck,
   CircleHelp,
   CreditCard,
   FileClock,
@@ -90,12 +91,21 @@ export function AdminSidebar({ allowedPageKeys }: { allowedPageKeys?: AdminPageK
             Help Center
           </span>
         </Link>
-        <div className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-          <span className="inline-flex items-center gap-1 font-semibold text-green-700">
-            <Globe2 className="h-3.5 w-3.5" />
-            LIVE
-          </span>
-          <span>v0.1.0</span>
+        <div className="rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+          <div className="flex items-center justify-between font-semibold text-green-700">
+            <span className="inline-flex items-center gap-1">
+              <CircleCheck className="h-3.5 w-3.5" />
+              API Active
+            </span>
+            <span className="h-2 w-2 rounded-full bg-green-500" />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between border-t border-border pt-1.5">
+            <span className="inline-flex items-center gap-1 font-semibold text-green-700">
+              <Globe2 className="h-3.5 w-3.5" />
+              LIVE
+            </span>
+            <span>v0.1.0</span>
+          </div>
         </div>
       </div>
     </aside>
