@@ -16,6 +16,7 @@ import { getEnv } from "@/server/ocs/config";
 import { OcsApiError, ocsErrorDescriptions } from "@/server/ocs/errors";
 import { getOcsClient } from "@/server/ocs/client";
 import { getCurrentAdmin } from "@/server/auth/admin-auth";
+import { getAdminAccessPolicy } from "@/server/db/subresellers";
 import { redactOcsPayload } from "@/server/ocs/redaction";
 
 export const dynamic = "force-dynamic";
@@ -96,14 +97,20 @@ export async function GET(request: NextRequest) {
   try {
     const admin = await getCurrentAdmin();
     if (!admin) return fail("ADMIN_SESSION_REQUIRED", "Admin session required.", 401, requestId);
+    const scope = await getOcsCreationScope(admin);
+    if (scope.error) return fail("OCS_SCOPE_REQUIRED", scope.error, 403, requestId);
 
     const env = getEnv();
     const resource = request.nextUrl.searchParams.get("resource") ?? "overview";
-    const resellerId = Number(request.nextUrl.searchParams.get("resellerId") ?? env.OCS_RESELLER_ID);
+    const requestedResellerId = Number(request.nextUrl.searchParams.get("resellerId") ?? env.OCS_RESELLER_ID);
+    const resellerId = scope.policy ? scope.policy.ocsResellerId : requestedResellerId;
     const client = getOcsClient();
 
     if (resource === "reseller-accounts") {
-      const response = await addResellerInfoBalances(await client.executeCommand(listResellerAccountCommand()), client);
+      const response = filterResellerAccounts(
+        await addResellerInfoBalances(await client.executeCommand(listResellerAccountCommand()), client),
+        scope.policy,
+      );
       return ok({ resource, response }, requestId);
     }
 
@@ -144,7 +151,7 @@ export async function GET(request: NextRequest) {
       client.executeCommand(listDetailedDestinationListCommand(resellerId)),
       client.executeCommand(listPrepaidPackageTemplateCommand({ resellerId })),
     ]);
-    const resellerAccounts = await addResellerInfoBalances(rawResellerAccounts, client);
+    const resellerAccounts = filterResellerAccounts(await addResellerInfoBalances(rawResellerAccounts, client), scope.policy);
 
     return ok({
       mode: env.OCS_MOCK_MODE ? "mock" : "live",
@@ -167,6 +174,8 @@ export async function POST(request: NextRequest) {
   try {
     const admin = await getCurrentAdmin();
     if (!admin) return fail("ADMIN_SESSION_REQUIRED", "Admin session required.", 401, requestId);
+    const scope = await getOcsCreationScope(admin);
+    if (scope.error) return fail("OCS_SCOPE_REQUIRED", scope.error, 403, requestId);
 
     const originError = assertSameOrigin(request);
     if (originError) return fail("FORBIDDEN_ORIGIN", originError, 403, requestId);
@@ -181,12 +190,16 @@ export async function POST(request: NextRequest) {
     if (parsed.data.action === "createLocationZone") {
       command = createLocationZoneCommand(parsed.data.payload);
     } else if (parsed.data.action === "createPrepaidPackageTemplate") {
+      const scopeError = validateScopedPackageTemplate(parsed.data.payload.resellerid, scope.policy);
+      if (scopeError) return fail("OCS_SCOPE_FORBIDDEN", scopeError, 403, requestId);
       const duplicate = await packageTemplateNameExists(client, parsed.data.payload.resellerid, parsed.data.payload.prepaidpackagetemplatename);
       if (duplicate) {
         return fail("DUPLICATE_PACKAGE_TEMPLATE_NAME", "A package template with this name already exists in OCS. Use a unique package template name.", 409, requestId);
       }
       command = createPrepaidPackageTemplateCommand(parsed.data.payload);
     } else {
+      const scopeError = validateScopedPackageAssignment(parsed.data.payload.accountForSubs, scope.policy);
+      if (scopeError) return fail("OCS_SCOPE_FORBIDDEN", scopeError, 403, requestId);
       command = affectPackageToSubscriberCommand(parsed.data.payload);
     }
 
@@ -203,6 +216,66 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return handleError(error, requestId);
   }
+}
+
+async function getOcsCreationScope(admin: NonNullable<Awaited<ReturnType<typeof getCurrentAdmin>>>) {
+  if (admin.role === "super_admin") return { policy: null, error: null };
+
+  const policy = await getAdminAccessPolicy(admin.email);
+  if (!policy) {
+    return {
+      policy: null,
+      error: "This admin account is not linked to an OCS reseller profile.",
+    };
+  }
+
+  return { policy, error: null };
+}
+
+function validateScopedPackageTemplate(resellerId: number, policy: Awaited<ReturnType<typeof getAdminAccessPolicy>>) {
+  if (!policy) return null;
+  if (resellerId !== policy.ocsResellerId) {
+    return `This account can only create package templates for OCS reseller ${policy.ocsResellerId}.`;
+  }
+  return null;
+}
+
+function validateScopedPackageAssignment(accountForSubs: number, policy: Awaited<ReturnType<typeof getAdminAccessPolicy>>) {
+  if (!policy || !policy.ocsAccountId) return null;
+  if (accountForSubs !== policy.ocsAccountId) {
+    return `This account can only assign packages to OCS account ${policy.ocsAccountId}.`;
+  }
+  return null;
+}
+
+function filterResellerAccounts(response: Record<string, unknown>, policy: Awaited<ReturnType<typeof getAdminAccessPolicy>>) {
+  if (!policy) return response;
+
+  const list = response.listResellerAccount;
+  if (!list || typeof list !== "object") return response;
+  const resellers = (list as { reseller?: unknown }).reseller;
+  if (!Array.isArray(resellers)) return response;
+
+  const scopedResellers = resellers.flatMap((reseller) => {
+    if (!reseller || typeof reseller !== "object") return [];
+    const resellerRecord = reseller as Record<string, unknown>;
+    if (Number(resellerRecord.id) !== policy.ocsResellerId) return [];
+
+    const accounts = Array.isArray(resellerRecord.account) ? resellerRecord.account : [];
+    const scopedAccounts = policy.ocsAccountId
+      ? accounts.filter((account) => account && typeof account === "object" && Number((account as Record<string, unknown>).id) === policy.ocsAccountId)
+      : accounts;
+
+    return [{ ...resellerRecord, account: scopedAccounts }];
+  });
+
+  return {
+    ...response,
+    listResellerAccount: {
+      ...(list as Record<string, unknown>),
+      reseller: scopedResellers,
+    },
+  };
 }
 
 function assertSameOrigin(request: NextRequest) {

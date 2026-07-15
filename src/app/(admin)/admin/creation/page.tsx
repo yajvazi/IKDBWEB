@@ -4,7 +4,14 @@ import { requireAdminPageAccess } from "@/server/auth/admin-access";
 export const dynamic = "force-dynamic";
 
 export default async function CreationPage() {
-  await requireAdminPageAccess("creation");
+  const { admin, policy } = await requireAdminPageAccess("creation");
+  const accessScope = admin.role === "super_admin" || !policy
+    ? null
+    : {
+        resellerId: policy.ocsResellerId,
+        accountId: policy.ocsAccountId,
+        resellerName: policy.resellerName,
+      };
 
-  return <CreationPanel resellerId={process.env.OCS_RESELLER_ID ?? "567"} />;
+  return <CreationPanel resellerId={String(accessScope?.resellerId ?? process.env.OCS_RESELLER_ID ?? "567")} accessScope={accessScope} />;
 }

@@ -65,6 +65,12 @@ type CreatedAccountPackage = {
   createdAt: string;
 };
 
+type OcsAccessScope = {
+  resellerId: number;
+  accountId: number | null;
+  resellerName: string;
+};
+
 type OcsCommandDoc = {
   group: string;
   command: string;
@@ -485,7 +491,7 @@ function ResellerBalanceList({
   );
 }
 
-export function CreationPanel({ resellerId }: { resellerId: string }) {
+export function CreationPanel({ resellerId, accessScope }: { resellerId: string; accessScope?: OcsAccessScope | null }) {
   const [activeTab, setActiveTab] = useState<TabKey>("assign");
   const [qrInput, setQrInput] = useState("LPA:1$smdp.example.net$ACTIVATION_CODE");
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -498,9 +504,10 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   const [locationReason, setLocationReason] = useState("Create sellable InternetKudo location zone");
   const [locationConfirmation, setLocationConfirmation] = useState("");
   const [templateReason, setTemplateReason] = useState("Create sellable InternetKudo package template");
-  const [selectedResellerId, setSelectedResellerId] = useState(resellerId);
+  const scoped = Boolean(accessScope);
+  const [selectedResellerId, setSelectedResellerId] = useState(String(accessScope?.resellerId ?? resellerId));
 
-  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState(accessScope?.accountId ? String(accessScope.accountId) : "");
   const [packageTemplateId, setPackageTemplateId] = useState("553");
   const [packageTemplateSearch, setPackageTemplateSearch] = useState("");
   const [validityPeriod, setValidityPeriod] = useState("30");
@@ -667,12 +674,15 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   async function loadOverview(notify = true) {
     setLoadingOverview(true);
     try {
-      const response = await fetch("/api/admin/ocs/creation?resource=overview", { cache: "no-store" });
+      const response = await fetch(`/api/admin/ocs/creation?resource=overview&resellerId=${encodeURIComponent(selectedResellerId)}`, { cache: "no-store" });
       const json = await response.json();
       if (!response.ok || !json.success) throw new Error(json.error?.message ?? "Unable to load OCS inventory.");
       setOverview(json.data);
       const loadedResellers = readResellers(json.data.resellerAccounts);
-      if (loadedResellers.length > 0 && !loadedResellers.some((item) => String(item.id) === selectedResellerId)) {
+      if (scoped && accessScope?.accountId) {
+        setSelectedResellerId(String(accessScope.resellerId));
+        setSelectedAccountId(String(accessScope.accountId));
+      } else if (loadedResellers.length > 0 && !loadedResellers.some((item) => String(item.id) === selectedResellerId)) {
         setSelectedResellerId(String(loadedResellers[0].id));
         const firstAccount = loadedResellers[0].account?.[0];
         if (firstAccount?.id) setSelectedAccountId(String(firstAccount.id));
@@ -698,6 +708,10 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
   }
 
   async function changeSelectedReseller(id: string) {
+    if (scoped) {
+      showToast("This account is locked to its assigned OCS reseller.", "warning");
+      return;
+    }
     setSelectedResellerId(id);
     setLoadingOverview(true);
     try {
@@ -930,7 +944,33 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
       </section>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-        <ResellerBalanceList resellers={resellers} selectedResellerId={selectedResellerId} onSelect={changeSelectedReseller} loading={loadingOverview} />
+        {scoped ? (
+          <section className="rounded-lg border border-blue-100 bg-blue-50 p-4 shadow-sm xl:col-span-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-950">Assigned OCS reseller</h2>
+                <p className="mt-1 text-xs text-slate-600">This account is locked to its configured reseller and account.</p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary ring-1 ring-blue-100">Scoped access</span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-blue-100 bg-white p-3">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Reseller</div>
+                <div className="mt-1 font-semibold text-slate-950">{accessScope?.resellerName ?? "Assigned reseller"}</div>
+              </div>
+              <div className="rounded-md border border-blue-100 bg-white p-3">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Reseller ID</div>
+                <div className="mt-1 font-mono text-sm font-bold text-slate-950">#{selectedResellerId}</div>
+              </div>
+              <div className="rounded-md border border-blue-100 bg-white p-3">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Account ID</div>
+                <div className="mt-1 font-mono text-sm font-bold text-slate-950">{selectedAccountId ? `#${selectedAccountId}` : "Default account"}</div>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <ResellerBalanceList resellers={resellers} selectedResellerId={selectedResellerId} onSelect={changeSelectedReseller} loading={loadingOverview} />
+        )}
         <InventoryList title="Network Profiles" rows={networkProfiles} idKey="id" nameKey="name" empty="No network profiles loaded yet." loading={loadingOverview} />
         <InventoryList title="Location Zones" rows={locationZones} idKey="zoneId" nameKey="zoneName" empty="No location zones loaded yet." loading={loadingOverview} />
         <InventoryList title="Destination Lists" rows={destinationLists} idKey="listId" nameKey="listName" empty="No destination lists loaded yet." loading={loadingOverview} />
@@ -1014,21 +1054,28 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
                   {selectedPackageTemplate ? <span>Selected #{String(templateId(selectedPackageTemplate))}</span> : null}
                 </div>
               </div>
-              <label className="block">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Account ID</span>
-                <select
-                  value={selectedAccountId}
-                  onChange={(event) => setSelectedAccountId(event.target.value)}
-                  className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
-                >
-                  <option value="">Select account</option>
-                  {selectedResellerAccounts.map((account) => (
-                    <option key={String(account.id)} value={String(account.id)}>
-                      #{String(account.id)} - {account.name ?? "Account"} - {formatBalance(account.balance)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {scoped ? (
+                <div className="rounded-md border border-border bg-slate-50 px-3 py-2">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Account ID</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{selectedAccountId ? `#${selectedAccountId}` : "Default account"}</div>
+                </div>
+              ) : (
+                <label className="block">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Account ID</span>
+                  <select
+                    value={selectedAccountId}
+                    onChange={(event) => setSelectedAccountId(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  >
+                    <option value="">Select account</option>
+                    {selectedResellerAccounts.map((account) => (
+                      <option key={String(account.id)} value={String(account.id)}>
+                        #{String(account.id)} - {account.name ?? "Account"} - {formatBalance(account.balance)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <Field label="Validity period days" value={validityPeriod} onChange={setValidityPeriod} placeholder="30" />
               <Button type="button" onClick={createAccountPackage} disabled={submittingAction === "affectPackageToSubscriber"} className="md:col-span-2">
                 <Send className="h-4 w-4" />
@@ -1106,25 +1153,33 @@ export function CreationPanel({ resellerId }: { resellerId: string }) {
           <PanelCard title="Create Package Template" description="Generate createPrepaidPackageTemplate with retail fields kept separate from upstream cost later in InternetKudo." className="xl:col-span-5">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Template name" value={templateName} onChange={setTemplateName} />
-              <label className="block">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Reseller</span>
-                <select
-                  value={selectedResellerId}
-                  onChange={(event) => void changeSelectedReseller(event.target.value)}
-                  className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                >
-                  {resellers.length === 0 ? (
-                    <option value={selectedResellerId}>Reseller #{selectedResellerId}</option>
-                  ) : (
-                    resellers.map((reseller) => (
-                      <option key={String(reseller.id)} value={String(reseller.id)}>
-                        {reseller.name ?? "Reseller"} #{String(reseller.id)} - {formatBalance(reseller.resellerBalance ?? reseller.resellerInfo?.balance ?? reseller.balance)}
-                      </option>
-                    ))
-                  )}
-                </select>
-                <p className="mt-1 text-xs text-slate-500">OCS creates package templates under the reseller ID. Account ID is used when assigning packages with accountForSubs.</p>
-              </label>
+              {scoped ? (
+                <div className="rounded-md border border-border bg-slate-50 px-3 py-2">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Reseller</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{accessScope?.resellerName ?? "Assigned reseller"} #{selectedResellerId}</div>
+                  <p className="mt-1 text-xs text-slate-500">OCS package templates are created only under this assigned reseller.</p>
+                </div>
+              ) : (
+                <label className="block">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Reseller</span>
+                  <select
+                    value={selectedResellerId}
+                    onChange={(event) => void changeSelectedReseller(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  >
+                    {resellers.length === 0 ? (
+                      <option value={selectedResellerId}>Reseller #{selectedResellerId}</option>
+                    ) : (
+                      resellers.map((reseller) => (
+                        <option key={String(reseller.id)} value={String(reseller.id)}>
+                          {reseller.name ?? "Reseller"} #{String(reseller.id)} - {formatBalance(reseller.resellerBalance ?? reseller.resellerInfo?.balance ?? reseller.balance)}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">OCS creates package templates under the reseller ID. Account ID is used when assigning packages with accountForSubs.</p>
+                </label>
+              )}
               <div className="md:col-span-2">
                 <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Location zone</span>
                 <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_220px]">
