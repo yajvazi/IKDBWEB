@@ -164,7 +164,7 @@ export async function createSubresellerTopupPaymentIntent(input: {
       {
         amount: input.amountMinor,
         currency: settings.currency.toLowerCase(),
-        automatic_payment_methods: { enabled: true },
+        payment_method_types: ["card"],
         description: `InternetKudo subreseller balance top-up for ${profile.name}`,
         metadata: {
           internetkudoPurpose: "subreseller_balance_topup",

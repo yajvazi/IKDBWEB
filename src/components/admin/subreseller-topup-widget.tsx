@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { CardCvcElement, CardExpiryElement, CardNumberElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import { CreditCard, RefreshCw, Wallet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,21 @@ type CreatedTopup = {
 };
 
 const stripePromiseCache = new Map<string, Promise<Stripe | null>>();
+const cardElementOptions = {
+  style: {
+    base: {
+      color: "#111827",
+      fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      fontSize: "15px",
+      fontSmoothing: "antialiased",
+      "::placeholder": { color: "#9CA3AF" },
+    },
+    invalid: {
+      color: "#DC2626",
+      iconColor: "#DC2626",
+    },
+  },
+};
 
 export function SubresellerBalanceLabel({ className }: { className?: string }) {
   const { context } = useSubresellerTopupContext();
@@ -227,12 +242,15 @@ export function SubresellerTopupWidget({ variant = "dashboard" }: { variant?: "d
   );
 }
 
-function PaymentForm({ topupId, onSuccess }: { topupId: string; onSuccess: (topupId: string) => void }) {
+function PaymentForm({ clientSecret, topupId, onSuccess }: { clientSecret: string; topupId: string; onSuccess: (topupId: string) => void }) {
   const stripe = useStripe();
   const elements = useElements();
   const [submitting, setSubmitting] = useState(false);
-  const [elementReady, setElementReady] = useState(false);
+  const [ready, setReady] = useState({ number: false, expiry: false, cvc: false });
+  const [complete, setComplete] = useState({ number: false, expiry: false, cvc: false });
   const [elementError, setElementError] = useState<string | null>(null);
+  const elementReady = ready.number && ready.expiry && ready.cvc;
+  const formComplete = complete.number && complete.expiry && complete.cvc;
 
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -240,10 +258,13 @@ function PaymentForm({ topupId, onSuccess }: { topupId: string; onSuccess: (topu
 
     setSubmitting(true);
     try {
-      const result = await stripe.confirmPayment({
-        elements,
-        redirect: "if_required",
-        confirmParams: { return_url: window.location.href },
+      const cardNumber = elements.getElement(CardNumberElement);
+      if (!cardNumber) throw new Error("Card form is not ready yet.");
+
+      const result = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: cardNumber,
+        },
       });
 
       if (result.error) {
@@ -261,7 +282,7 @@ function PaymentForm({ topupId, onSuccess }: { topupId: string; onSuccess: (topu
 
   return (
     <form onSubmit={submitPayment}>
-      <div className="rounded-lg border border-border bg-white p-3 shadow-sm">
+      <div className="rounded-lg border border-border bg-white p-4 shadow-sm">
         {!elementReady && !elementError ? (
           <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 p-3 text-sm font-semibold text-blue-700">
             Loading secure card form...
@@ -272,29 +293,60 @@ function PaymentForm({ topupId, onSuccess }: { topupId: string; onSuccess: (topu
             {elementError}
           </div>
         ) : null}
-        <div className="min-h-[164px]">
-          <PaymentElement
-            options={{ layout: "tabs" }}
-            onReady={() => {
-              setElementReady(true);
-              setElementError(null);
-            }}
-            onLoaderStart={() => {
-              setElementReady(false);
-              setElementError(null);
-            }}
-            onLoadError={(event) => {
-              setElementReady(false);
-              setElementError(event.error.message || "Stripe could not load the secure card form. Refresh and try again.");
-            }}
-          />
+        <div className="space-y-3">
+          <SecureCardField label="Card number">
+            <CardNumberElement
+              options={cardElementOptions}
+              onReady={() => setReady((value) => ({ ...value, number: true }))}
+              onChange={(event) => {
+                setComplete((value) => ({ ...value, number: event.complete }));
+                setElementError(event.error?.message ?? null);
+              }}
+            />
+          </SecureCardField>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SecureCardField label="Expiry date">
+              <CardExpiryElement
+                options={cardElementOptions}
+                onReady={() => setReady((value) => ({ ...value, expiry: true }))}
+                onChange={(event) => {
+                  setComplete((value) => ({ ...value, expiry: event.complete }));
+                  setElementError(event.error?.message ?? null);
+                }}
+              />
+            </SecureCardField>
+            <SecureCardField label="CVC">
+              <CardCvcElement
+                options={cardElementOptions}
+                onReady={() => setReady((value) => ({ ...value, cvc: true }))}
+                onChange={(event) => {
+                  setComplete((value) => ({ ...value, cvc: event.complete }));
+                  setElementError(event.error?.message ?? null);
+                }}
+              />
+            </SecureCardField>
+          </div>
+          <div className="rounded-md border border-green-100 bg-green-50 p-3 text-xs font-semibold text-green-700">
+            Card details are encrypted by Stripe and are never stored on InternetKudo servers.
+          </div>
         </div>
       </div>
-      <Button type="submit" className="mt-4 w-full" disabled={!stripe || !elements || !elementReady || Boolean(elementError) || submitting}>
+      <Button type="submit" className="mt-4 w-full" disabled={!stripe || !elements || !elementReady || !formComplete || Boolean(elementError) || submitting}>
         <CreditCard className="h-4 w-4" />
         {submitting ? "Processing..." : elementReady ? "Pay now" : "Loading card form..."}
       </Button>
     </form>
+  );
+}
+
+function SecureCardField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+      <div className="rounded-md border border-border bg-white px-3 py-3 shadow-sm ring-primary/20 transition focus-within:border-primary focus-within:ring-4">
+        {children}
+      </div>
+    </label>
   );
 }
 
@@ -335,17 +387,9 @@ function renderPaymentModal(input: {
               stripe={input.stripePromise}
               options={{
                 clientSecret: input.created.clientSecret,
-                appearance: {
-                  theme: "stripe",
-                  variables: {
-                    colorPrimary: "#004FFE",
-                    colorText: "#111827",
-                    borderRadius: "8px",
-                  },
-                },
               }}
             >
-              <PaymentForm topupId={input.created.topup.id} onSuccess={input.pollBalance} />
+              <PaymentForm clientSecret={input.created.clientSecret} topupId={input.created.topup.id} onSuccess={input.pollBalance} />
             </Elements>
           )}
         </div>
