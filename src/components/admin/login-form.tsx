@@ -1,14 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { LockKeyhole, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/lib/toastify";
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("admin@internetkudo.com");
   const [password, setPassword] = useState("");
@@ -28,8 +27,8 @@ export function LoginForm() {
       if (!response.ok || !json.success) throw new Error(json.error?.message ?? "Login failed.");
 
       const next = searchParams.get("next");
-      router.replace(next?.startsWith("/admin") && next !== "/admin/login" ? next : "/admin/dashboard");
-      router.refresh();
+      const target = next?.startsWith("/admin") && next !== "/admin/login" ? next : "/admin/dashboard";
+      window.location.replace(target);
     } catch (loginError) {
       showToast(loginError instanceof Error ? loginError.message : "Login failed.", "error");
     } finally {
