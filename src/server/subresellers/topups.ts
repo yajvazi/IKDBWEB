@@ -264,9 +264,10 @@ export async function applyPaidSubresellerTopup(topupId: string, input: {
   `;
 
   try {
+    const stripeMode: StripeRuntimeMode = topup.stripe_mode === "test" ? "test" : "live";
     const settlement = await resolveStripeSettlement({
       paymentIntentId: String(topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? ""),
-      mode: topup.stripe_mode === "test" ? "test" : "live",
+      mode: stripeMode,
       fallbackGrossMinor: Number(topup.amount_minor),
     });
     if (settlement.netAmountMinor <= 0) {
@@ -283,18 +284,21 @@ export async function applyPaidSubresellerTopup(topupId: string, input: {
             grossAmountMinor: settlement.grossAmountMinor,
             stripeFeeMinor: settlement.stripeFeeMinor,
             netAmountMinor: settlement.netAmountMinor,
+            stripeMode,
+            creditsLiveOcsBalance: true,
           })}::jsonb,
           updated_at = now()
       where id = ${topupId}
     `;
 
     const amount = Number((settlement.netAmountMinor / 100).toFixed(2));
+    const modeLabel = stripeMode === "test" ? "Stripe TEST demo top-up" : "Stripe top-up";
     const response = await getOcsClient().executeCommand(modifyResellerBalanceCommand({
       resellerId: Number(topup.ocs_reseller_id),
       type: "Stripe",
       amount,
       setBalance: false,
-      description: `InternetKudo Stripe top-up ${topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? topupId}; gross ${formatMinor(settlement.grossAmountMinor, String(topup.currency))}; Stripe fee ${formatMinor(settlement.stripeFeeMinor, String(topup.currency))}; net ${formatMinor(settlement.netAmountMinor, String(topup.currency))}`,
+      description: `InternetKudo ${modeLabel} ${topup.stripe_payment_intent_id ?? input.stripePaymentIntentId ?? topupId}; gross ${formatMinor(settlement.grossAmountMinor, String(topup.currency))}; Stripe fee ${formatMinor(settlement.stripeFeeMinor, String(topup.currency))}; net ${formatMinor(settlement.netAmountMinor, String(topup.currency))}`,
     }));
 
     await db.begin(async (tx) => {

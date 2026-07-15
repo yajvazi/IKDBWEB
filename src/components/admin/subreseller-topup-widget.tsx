@@ -234,7 +234,10 @@ export function SubresellerTopupWidget({ variant = "dashboard" }: { variant?: "d
             <CreditCard className="h-4 w-4" />
             {creating ? "Opening payment..." : "Top up with Stripe"}
           </Button>
-          <div className="mt-2 text-xs leading-5 text-slate-600">OCS receives the paid amount minus Stripe fees.</div>
+          <div className="mt-2 text-xs leading-5 text-slate-600">
+            OCS receives the paid amount minus Stripe fees.
+            {context?.settings.stripeMode === "test" ? " Test mode still credits OCS balance for demo purposes." : null}
+          </div>
         </form>
       </div>
       {renderPaymentModal({ paymentOpen, setPaymentOpen, created, stripePromise, processingMessage, pollBalance })}

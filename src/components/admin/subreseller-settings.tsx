@@ -556,7 +556,7 @@ export function SubresellerSettings() {
                     ))}
                   </div>
                   <p className="mt-2 text-xs leading-5 text-slate-500">
-                    Test mode uses `STRIPE_TEST_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY`. Live mode captures real payments.
+                    Test mode uses `STRIPE_TEST_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY`. For demos, successful test payments still credit the selected OCS reseller balance.
                   </p>
                 </div>
                 <Button type="button" onClick={saveTopupSettings} disabled={savingTopupSettings}>
