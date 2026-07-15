@@ -1,17 +1,11 @@
 import type { AdminRecord, AdminWorkspaceConfig } from "@/components/admin/operations-data";
 import { customersConfig, ordersConfig, paymentsConfig } from "@/components/admin/operations-data";
 import type { KpiMetric, StatusTone } from "@/types/admin";
-import { getStripeClient } from "@/server/stripe/client";
+import { getCachedCharges, getCachedCustomers, getCachedPaymentIntents, getLatestStripeBalanceSummary, getStripeCacheStatus } from "@/server/stripe/cache";
 import type Stripe from "stripe";
 
 const eur = new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" });
 const stripePageLimit = 100;
-const stripeHistoryCacheMs = 10 * 60 * 1000;
-
-const stripeHistoryCache: {
-  paymentIntents?: { expiresAt: number; data: Stripe.PaymentIntent[] };
-  charges?: { expiresAt: number; data: Stripe.Charge[] };
-} = {};
 
 type StripeCursorOptions = {
   startingAfter?: string;
@@ -34,14 +28,12 @@ const dashboardKpiTemplates: KpiMetric[] = [
 
 export async function getPaymentsWorkspaceConfig(options: StripeCursorOptions = {}): Promise<AdminWorkspaceConfig> {
   try {
-    const stripe = getStripeClient();
-    const [page, allPaymentIntents] = await Promise.all([
-      stripe.paymentIntents.list({
-        limit: stripePageLimit,
-        starting_after: options.startingAfter,
-      }),
-      getAllPaymentIntents(stripe),
+    const [allPaymentIntents, cacheStatus] = await Promise.all([
+      getCachedPaymentIntents({ sync: true }),
+      getStripeCacheStatus(),
     ]);
+    const balance = await getLatestStripeBalanceSummary();
+    const page = paginateByStartingAfter(allPaymentIntents, options.startingAfter);
     const records = page.data.map(paymentIntentToRecord);
 
     if (records.length === 0) return emptyLiveConfig(paymentsConfig, "No live Stripe payments found.");
@@ -53,22 +45,25 @@ export async function getPaymentsWorkspaceConfig(options: StripeCursorOptions = 
     return {
       ...paymentsConfig,
       modeLabel: "LIVE",
-      operationsLogTitle: "Live Stripe operations log",
-      operationsLogDescription: "Payment rows are loaded directly from Stripe. Summary cards use Stripe auto-pagination across the full account history.",
-      description: "Live Stripe PaymentIntents from the connected Stripe account. Cursor pagination controls the visible rows; summary totals are calculated from all available Stripe history.",
+      operationsLogTitle: "Cached Stripe operations log",
+      operationsLogDescription: "Payment rows are read from Supabase and incrementally synced from Stripe on page reload.",
+      description: "Stripe PaymentIntents cached in Supabase/Postgres. Each page reload syncs new Stripe records, then renders from the database for shorter load times.",
       summary: [
-        { label: "Visible Stripe page", value: records.length.toLocaleString(), tone: "info" },
-        { label: "All Stripe payments", value: allPaymentIntents.length.toLocaleString(), tone: "info" },
+        { label: "Visible cached page", value: records.length.toLocaleString(), tone: "info" },
+        { label: "Cached payments", value: cacheStatus.paymentIntents.toLocaleString(), tone: "info" },
         { label: "All gross sales", value: formatMinor(grossMinor), tone: "success" },
         { label: "Succeeded", value: succeeded.toLocaleString(), tone: "success" },
         { label: "Failed", value: failed.toLocaleString(), tone: failed > 0 ? "warning" : "success" },
+        { label: "Stripe available", value: formatBalanceAmounts(balance?.available), tone: "success" },
+        { label: "Stripe pending", value: formatBalanceAmounts(balance?.pending), tone: "warning" },
+        { label: "Last sync", value: formatSyncTime(cacheStatus.lastSyncedAt), tone: "neutral" },
       ],
       records,
       pagination: {
-        label: "Full Stripe history",
+        label: "Cached Stripe history",
         note: page.has_more
-          ? "Showing one live Stripe page. Use Next older page to continue through every PaymentIntent since the account began."
-          : "You are at the oldest available Stripe PaymentIntent page.",
+          ? "Showing one Supabase cached page. Use Next older page to continue through cached PaymentIntent history."
+          : "You are at the oldest cached PaymentIntent page.",
         nextHref: page.has_more && records.at(-1) ? `/admin/payments?starting_after=${encodeURIComponent(records.at(-1)!.id)}` : undefined,
         resetHref: options.startingAfter ? "/admin/payments" : undefined,
       },
@@ -80,16 +75,12 @@ export async function getPaymentsWorkspaceConfig(options: StripeCursorOptions = 
 }
 
 export async function getStripeOrdersWorkspaceConfig(options: StripeCursorOptions = {}): Promise<AdminWorkspaceConfig> {
-  const stripe = getStripeClient();
-  const [page, allPaymentIntents] = await Promise.all([
-    stripe.paymentIntents.list({
-      limit: stripePageLimit,
-      starting_after: options.startingAfter,
-      expand: ["data.customer", "data.latest_charge"],
-    }),
-    getAllPaymentIntents(stripe),
+  const [allPaymentIntents, cacheStatus] = await Promise.all([
+    getCachedPaymentIntents({ sync: true }),
+    getStripeCacheStatus(),
   ]);
-  const records = allPaymentIntents.map(paymentIntentToOrderRecord);
+  const page = paginateByStartingAfter(allPaymentIntents, options.startingAfter);
+  const records = page.data.map(paymentIntentToOrderRecord);
   const succeeded = allPaymentIntents.filter((payment) => payment.status === "succeeded");
   const failed = allPaymentIntents.filter((payment) => payment.status === "requires_payment_method" || payment.status === "canceled");
   const processing = allPaymentIntents.filter((payment) => ["processing", "requires_action", "requires_confirmation"].includes(payment.status));
@@ -99,34 +90,38 @@ export async function getStripeOrdersWorkspaceConfig(options: StripeCursorOption
     ...ordersConfig,
     modeLabel: "LIVE",
     primaryAction: "Create order",
-    operationsLogTitle: "Live Stripe order feed",
-    operationsLogDescription: "Rows are derived from every live Stripe PaymentIntent until local InternetKudo order persistence is populated.",
-    description: "Live order view derived from every Stripe PaymentIntent since the account began. Local fulfillment, eSIM ownership, and OCS request links appear when checkout writes InternetKudo orders to Postgres.",
+    operationsLogTitle: "Cached Stripe order feed",
+    operationsLogDescription: "Rows are derived from Supabase-cached Stripe PaymentIntents until local InternetKudo order persistence is populated.",
+    description: "Order view derived from cached Stripe PaymentIntents. Each reload syncs newly created Stripe records, then renders from Postgres.",
     summary: [
-      { label: "Visible Stripe orders", value: records.length.toLocaleString(), tone: "info" },
-      { label: "All Stripe orders", value: allPaymentIntents.length.toLocaleString(), tone: "info" },
+      { label: "Visible cached orders", value: records.length.toLocaleString(), tone: "info" },
+      { label: "Cached Stripe orders", value: cacheStatus.paymentIntents.toLocaleString(), tone: "info" },
       { label: "Paid", value: succeeded.length.toLocaleString(), tone: "success" },
       { label: "Failed", value: failed.length.toLocaleString(), tone: failed.length > 0 ? "warning" : "success" },
       { label: "Processing", value: processing.length.toLocaleString(), tone: processing.length > 0 ? "warning" : "neutral" },
       { label: "Gross sales", value: formatMinor(grossMinor), tone: "success" },
+      { label: "Last sync", value: formatSyncTime(cacheStatus.lastSyncedAt), tone: "neutral" },
     ],
     records,
     emptyState: "No Stripe PaymentIntents found for the connected account.",
-    pagination: page.has_more || options.startingAfter ? {
-      label: "Full Stripe order history loaded",
-      note: `Showing ${records.length.toLocaleString()} PaymentIntents from Stripe history. Pagination controls are disabled because this page now searches the full loaded history.`,
+    pagination: {
+      label: "Cached Stripe order history",
+      note: page.has_more
+        ? "Showing one cached page. Use Next older page to continue through cached PaymentIntent history."
+        : "You are at the oldest cached PaymentIntent page.",
+      nextHref: page.has_more && records.at(-1) ? `/admin/orders?starting_after=${encodeURIComponent(records.at(-1)!.id)}` : undefined,
       resetHref: options.startingAfter ? "/admin/orders" : undefined,
-    } : undefined,
+    },
   };
 }
 
 export async function getCustomersWorkspaceConfig(options: StripeCursorOptions = {}): Promise<AdminWorkspaceConfig> {
   try {
-    const stripe = getStripeClient();
-    const page = await stripe.customers.list({
-      limit: stripePageLimit,
-      starting_after: options.startingAfter,
-    });
+    const [allCustomers, cacheStatus] = await Promise.all([
+      getCachedCustomers({ sync: true }),
+      getStripeCacheStatus(),
+    ]);
+    const page = paginateByStartingAfter(allCustomers, options.startingAfter);
     const records = page.data.map(customerToRecord);
 
     if (records.length === 0) return emptyLiveConfig(customersConfig, "No live Stripe customers found.");
@@ -136,21 +131,23 @@ export async function getCustomersWorkspaceConfig(options: StripeCursorOptions =
     return {
       ...customersConfig,
       modeLabel: "LIVE",
-      operationsLogTitle: "Live Stripe operations log",
-      operationsLogDescription: "Customer rows are loaded directly from Stripe using cursor pagination.",
-      description: "Live Stripe customer records from the connected Stripe account. Cursor pagination removes the previous last-100 cap and lets you continue back to the beginning of the account history.",
+      operationsLogTitle: "Cached Stripe operations log",
+      operationsLogDescription: "Customer rows are read from Supabase and incrementally synced from Stripe on page reload.",
+      description: "Stripe customer records cached in Supabase/Postgres. Each page reload syncs new Stripe customers, then renders from the database for shorter load times.",
       summary: [
-        { label: "Visible Stripe page", value: records.length.toLocaleString(), tone: "info" },
+        { label: "Visible cached page", value: records.length.toLocaleString(), tone: "info" },
+        { label: "Cached customers", value: cacheStatus.customers.toLocaleString(), tone: "info" },
         { label: "With email", value: withEmail.toLocaleString(), tone: "success" },
         { label: "Delinquent", value: "0", tone: "success" },
-        { label: "Source", value: "Stripe", tone: "neutral" },
+        { label: "Source", value: "Supabase cache", tone: "neutral" },
+        { label: "Last sync", value: formatSyncTime(cacheStatus.lastSyncedAt), tone: "neutral" },
       ],
       records,
       pagination: {
-        label: "Full Stripe history",
+        label: "Cached Stripe history",
         note: page.has_more
-          ? "Showing one live Stripe page. Use Next older page to continue through every Customer since the account began."
-          : "You are at the oldest available Stripe Customer page.",
+          ? "Showing one cached page. Use Next older page to continue through cached Customer history."
+          : "You are at the oldest cached Customer page.",
         nextHref: page.has_more && records.at(-1) ? `/admin/customers?starting_after=${encodeURIComponent(records.at(-1)!.id)}` : undefined,
         resetHref: options.startingAfter ? "/admin/customers" : undefined,
       },
@@ -163,10 +160,9 @@ export async function getCustomersWorkspaceConfig(options: StripeCursorOptions =
 
 export async function getDashboardKpis(): Promise<KpiMetric[]> {
   try {
-    const stripe = getStripeClient();
     const [paymentIntents, charges] = await Promise.all([
-      getAllPaymentIntents(stripe),
-      getAllCharges(stripe),
+      getCachedPaymentIntents({ sync: true }),
+      getCachedCharges({ sync: true }),
     ]);
 
     const succeeded = paymentIntents.filter((payment) => payment.status === "succeeded");
@@ -198,10 +194,9 @@ export async function getDashboardAnalytics() {
   let paymentIntents: Stripe.PaymentIntent[] = [];
   let charges: Stripe.Charge[] = [];
   try {
-    const stripe = getStripeClient();
     [paymentIntents, charges] = await Promise.all([
-      getAllPaymentIntents(stripe),
-      getAllCharges(stripe),
+      getCachedPaymentIntents({ sync: true }),
+      getCachedCharges({ sync: true }),
     ]);
   } catch (error) {
     console.warn("Stripe dashboard analytics fetch failed; returning empty live analytics.", safeError(error));
@@ -445,32 +440,22 @@ function zeroDashboardKpis(): KpiMetric[] {
   }));
 }
 
-async function collectStripeHistory<T>(list: AsyncIterable<T>) {
-  const items: T[] = [];
-  for await (const item of list) {
-    items.push(item);
-  }
-  return items;
+function paginateByStartingAfter<T extends { id: string }>(items: T[], startingAfter?: string) {
+  const startIndex = startingAfter ? items.findIndex((item) => item.id === startingAfter) + 1 : 0;
+  const safeStart = startIndex > 0 ? startIndex : 0;
+  const data = items.slice(safeStart, safeStart + stripePageLimit);
+  return {
+    data,
+    has_more: safeStart + stripePageLimit < items.length,
+  };
 }
 
-async function getAllPaymentIntents(stripe: Stripe) {
-  const now = Date.now();
-  if (stripeHistoryCache.paymentIntents && stripeHistoryCache.paymentIntents.expiresAt > now) {
-    return stripeHistoryCache.paymentIntents.data;
-  }
-
-  const data = await collectStripeHistory(stripe.paymentIntents.list({ limit: stripePageLimit }));
-  stripeHistoryCache.paymentIntents = { data, expiresAt: now + stripeHistoryCacheMs };
-  return data;
+function formatSyncTime(value: string | null) {
+  if (!value) return "Not synced";
+  return new Date(value).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-async function getAllCharges(stripe: Stripe) {
-  const now = Date.now();
-  if (stripeHistoryCache.charges && stripeHistoryCache.charges.expiresAt > now) {
-    return stripeHistoryCache.charges.data;
-  }
-
-  const data = await collectStripeHistory(stripe.charges.list({ limit: stripePageLimit }));
-  stripeHistoryCache.charges = { data, expiresAt: now + stripeHistoryCacheMs };
-  return data;
+function formatBalanceAmounts(values?: Array<{ amount: number; currency: string }>) {
+  if (!values?.length) return "€0.00";
+  return values.map((item) => formatMinor(item.amount, item.currency)).join(", ");
 }
