@@ -13,13 +13,18 @@ export async function getCurrentAdminAccess() {
   return {
     admin,
     policy,
-    allowedPageKeys: policy?.allowedDashboardPages?.length ? policy.allowedDashboardPages : null,
+    allowedPageKeys: policy?.allowedDashboardPages?.length ? policy.allowedDashboardPages : ["dashboard" as AdminPageKey],
   };
 }
 
 export async function requireAdminPageAccess(pageKey: AdminPageKey) {
   const { admin, policy } = await getCurrentAdminAccess();
-  if (admin.role === "super_admin" || !policy) return { admin, policy };
+  if (admin.role === "super_admin") return { admin, policy };
+
+  if (!policy) {
+    if (pageKey !== "dashboard") redirect("/admin/dashboard");
+    return { admin, policy };
+  }
 
   if (!policy.allowedDashboardPages.includes(pageKey)) {
     const fallback = policy.allowedDashboardPages[0] ?? "dashboard";

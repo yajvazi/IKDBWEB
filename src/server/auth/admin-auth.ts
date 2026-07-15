@@ -14,7 +14,7 @@ export const ADMIN_SESSION_COOKIE = "ik_admin_session";
 const DEFAULT_ADMIN_EMAIL = "admin@internetkudo.com";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
-export const adminRoles = ["super_admin", "operations", "finance", "support", "analyst", "developer", "read_only"] as const;
+export const adminRoles = ["super_admin", "subreseller", "vendor", "operations", "finance", "support", "analyst", "developer", "read_only"] as const;
 export type AdminRole = (typeof adminRoles)[number];
 
 export type AdminUser = {
