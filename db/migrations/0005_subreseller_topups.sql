@@ -4,7 +4,7 @@ create table if not exists public.subreseller_topups (
   ocs_reseller_id bigint not null,
   amount_minor integer not null check (amount_minor > 0),
   currency text not null default 'EUR',
-  stripe_mode text not null default 'live' check (stripe_mode in ('live','test')),
+  stripe_mode text not null default 'test' check (stripe_mode in ('live','test')),
   stripe_payment_intent_id text unique,
   payment_status text not null default 'requires_payment' check (payment_status in ('requires_payment','processing','succeeded','failed','canceled','refunded')),
   ocs_status text not null default 'not_started' check (ocs_status in ('not_started','applying','applied','failed','manual_review')),
@@ -30,7 +30,7 @@ values (
   jsonb_build_object(
     'minimumAmountMinor', 50000,
     'currency', 'EUR',
-    'stripeMode', 'live'
+    'stripeMode', 'test'
   ),
   now()
 )

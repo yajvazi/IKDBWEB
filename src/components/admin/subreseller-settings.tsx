@@ -110,7 +110,7 @@ const defaultForm: FormState = {
 const defaultTopupSettings: TopupSettings = {
   minimumAmountMinor: 50_000,
   currency: "EUR",
-  stripeMode: "live",
+  stripeMode: "test",
 };
 
 export function SubresellerSettings() {
@@ -541,7 +541,7 @@ export function SubresellerSettings() {
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Stripe mode</div>
                   <div className="mt-1 grid grid-cols-2 gap-2">
-                    {(["live", "test"] as const).map((mode) => (
+                    {(["test", "live"] as const).map((mode) => (
                       <button
                         key={mode}
                         type="button"
@@ -551,10 +551,13 @@ export function SubresellerSettings() {
                           topupSettings.stripeMode === mode ? "border-primary bg-primary text-white" : "border-border bg-white text-slate-600 hover:bg-slate-100",
                         )}
                       >
-                        {mode}
+                        {mode === "test" ? "Test mode" : "Live mode"}
                       </button>
                     ))}
                   </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    Test mode uses `STRIPE_TEST_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY`. Live mode captures real payments.
+                  </p>
                 </div>
                 <Button type="button" onClick={saveTopupSettings} disabled={savingTopupSettings}>
                   <Save className="h-4 w-4" />

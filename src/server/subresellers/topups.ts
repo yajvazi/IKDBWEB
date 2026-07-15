@@ -39,7 +39,7 @@ export type SubresellerTopup = {
 const defaultSettings: SubresellerTopupSettings = {
   minimumAmountMinor: 50_000,
   currency: "EUR",
-  stripeMode: "live",
+  stripeMode: "test",
 };
 
 export async function getSubresellerTopupSettings(): Promise<SubresellerTopupSettings> {
@@ -357,7 +357,7 @@ export async function applyPaidSubresellerTopup(topupId: string, input: {
 function normalizeSettings(value: unknown): SubresellerTopupSettings {
   const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const minimumAmountMinor = Number(record.minimumAmountMinor ?? defaultSettings.minimumAmountMinor);
-  const stripeMode = record.stripeMode === "test" ? "test" : "live";
+  const stripeMode = record.stripeMode === "live" ? "live" : defaultSettings.stripeMode;
 
   return {
     minimumAmountMinor: Number.isFinite(minimumAmountMinor) && minimumAmountMinor > 0 ? Math.round(minimumAmountMinor) : defaultSettings.minimumAmountMinor,
