@@ -231,6 +231,8 @@ function PaymentForm({ topupId, onSuccess }: { topupId: string; onSuccess: (topu
   const stripe = useStripe();
   const elements = useElements();
   const [submitting, setSubmitting] = useState(false);
+  const [elementReady, setElementReady] = useState(false);
+  const [elementError, setElementError] = useState<string | null>(null);
 
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -259,10 +261,38 @@ function PaymentForm({ topupId, onSuccess }: { topupId: string; onSuccess: (topu
 
   return (
     <form onSubmit={submitPayment}>
-      <PaymentElement />
-      <Button type="submit" className="mt-4 w-full" disabled={!stripe || !elements || submitting}>
+      <div className="rounded-lg border border-border bg-white p-3 shadow-sm">
+        {!elementReady && !elementError ? (
+          <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 p-3 text-sm font-semibold text-blue-700">
+            Loading secure card form...
+          </div>
+        ) : null}
+        {elementError ? (
+          <div className="mb-3 rounded-md border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-700">
+            {elementError}
+          </div>
+        ) : null}
+        <div className="min-h-[164px]">
+          <PaymentElement
+            options={{ layout: "tabs" }}
+            onReady={() => {
+              setElementReady(true);
+              setElementError(null);
+            }}
+            onLoaderStart={() => {
+              setElementReady(false);
+              setElementError(null);
+            }}
+            onLoadError={(event) => {
+              setElementReady(false);
+              setElementError(event.error.message || "Stripe could not load the secure card form. Refresh and try again.");
+            }}
+          />
+        </div>
+      </div>
+      <Button type="submit" className="mt-4 w-full" disabled={!stripe || !elements || !elementReady || Boolean(elementError) || submitting}>
         <CreditCard className="h-4 w-4" />
-        {submitting ? "Processing..." : "Pay now"}
+        {submitting ? "Processing..." : elementReady ? "Pay now" : "Loading card form..."}
       </Button>
     </form>
   );
