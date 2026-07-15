@@ -81,7 +81,7 @@ export function AdminSidebar({ allowedPageKeys }: { allowedPageKeys?: AdminPageK
 
       <div className="mt-auto space-y-3">
         <Link
-          href="/admin/settings"
+          href="/admin/help"
           className="flex items-center gap-3 rounded-md border border-border bg-white px-3 py-3 text-xs text-slate-600 shadow-sm"
         >
           <CircleHelp className="h-4 w-4 text-primary" />

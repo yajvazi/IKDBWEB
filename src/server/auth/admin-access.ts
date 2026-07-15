@@ -19,6 +19,7 @@ export async function getCurrentAdminAccess() {
 
 export async function requireAdminPageAccess(pageKey: AdminPageKey) {
   const { admin, policy } = await getCurrentAdminAccess();
+  if (pageKey === "help") return { admin, policy };
   if (admin.role === "super_admin") return { admin, policy };
 
   if (!policy) {

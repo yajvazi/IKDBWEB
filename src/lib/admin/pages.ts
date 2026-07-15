@@ -13,6 +13,7 @@ export const adminPageOptions = [
   { key: "audit-logs", label: "Audit Logs", href: "/admin/logs/audit" },
   { key: "admin-users", label: "Admin Users", href: "/admin/users" },
   { key: "settings", label: "Settings", href: "/admin/settings" },
+  { key: "help", label: "Help Center", href: "/admin/help" },
 ] as const;
 
 export type AdminPageKey = (typeof adminPageOptions)[number]["key"];

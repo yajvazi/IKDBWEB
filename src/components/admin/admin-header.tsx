@@ -257,7 +257,7 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
               </Link>
               <Link
                 role="menuitem"
-                href="/admin/settings"
+                href="/admin/help"
                 className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-primary"
                 onClick={() => setProfileOpen(false)}
               >
@@ -329,6 +329,14 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
             <div className="mt-auto rounded-md bg-slate-50 px-3 py-2 text-[11px] font-semibold text-green-700">
               LIVE · v0.1.0
             </div>
+            <Link
+              href="/admin/help"
+              onClick={() => setMobileNavOpen(false)}
+              className="mt-3 flex items-center gap-3 rounded-md border border-border bg-white px-3 py-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-blue-50 hover:text-primary"
+            >
+              <CircleHelp className="h-4 w-4" />
+              Help Center
+            </Link>
           </aside>
         </div>
       ) : null}
