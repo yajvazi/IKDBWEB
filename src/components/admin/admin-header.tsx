@@ -108,33 +108,36 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
     <>
       <header className="sticky top-0 z-30 border-b border-border bg-white/95 px-4 py-3 backdrop-blur lg:px-6">
         <div className="flex items-center gap-3" ref={controlsRef}>
-        <Button
-          variant="outline"
-          size="icon"
-          className="lg:hidden"
-          aria-label="Open navigation"
-          aria-expanded={mobileNavOpen}
-          aria-controls="mobile-admin-navigation"
-          onClick={() => setMobileNavOpen(true)}
-        >
-          <Menu className="h-4 w-4" />
-        </Button>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Button
+              variant="outline"
+              size="icon"
+              className="lg:hidden"
+              aria-label="Open navigation"
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-admin-navigation"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
 
-        <div className="relative max-w-xl flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            suppressHydrationWarning
-            className="h-10 w-full rounded-md border border-border bg-white pl-10 pr-3 text-sm outline-none ring-primary/20 transition focus:ring-4"
-            placeholder="Search orders, customers, eSIMs..."
-            value={globalSearch}
-            onChange={(event) => setGlobalSearch(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") runGlobalSearch();
-            }}
-          />
-        </div>
+            <div className="relative w-full max-w-xl lg:max-w-[520px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                suppressHydrationWarning
+                className="h-10 w-full rounded-md border border-border bg-white pl-10 pr-3 text-sm outline-none ring-primary/20 transition focus:ring-4"
+                placeholder="Search orders, customers, eSIMs..."
+                value={globalSearch}
+                onChange={(event) => setGlobalSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") runGlobalSearch();
+                }}
+              />
+            </div>
+          </div>
 
-        <div className="relative hidden md:block">
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-2 md:gap-3">
+            <div className="relative hidden md:block">
           <button
             className="flex h-10 items-center gap-2 rounded-md border border-border bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none ring-primary/20 transition hover:bg-slate-50 focus:ring-4"
             aria-haspopup="menu"
@@ -165,9 +168,9 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
               ))}
             </div>
           ) : null}
-        </div>
+            </div>
 
-        <div className="relative">
+            <div className="relative">
           <button
             className="relative grid h-10 w-10 place-items-center rounded-md border border-border bg-white text-slate-600 shadow-sm outline-none ring-primary/20 transition hover:bg-slate-50 focus:ring-4"
             aria-label="Open notifications"
@@ -202,14 +205,14 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
               ))}
             </div>
           ) : null}
-        </div>
+            </div>
 
-        <StatusBadge tone="success" className="hidden gap-1 md:inline-flex">
-          <CircleCheck className="h-3 w-3" />
-          API Active
-        </StatusBadge>
+            <StatusBadge tone="success" className="hidden gap-1 md:inline-flex">
+              <CircleCheck className="h-3 w-3" />
+              API Active
+            </StatusBadge>
 
-        <div className="relative" ref={profileRef}>
+            <div className="relative" ref={profileRef}>
           <button
             className="flex items-center gap-3 rounded-md border border-border bg-white px-2 py-1.5 shadow-sm outline-none ring-primary/20 transition hover:bg-slate-50 focus:ring-4"
             aria-haspopup="menu"
@@ -278,6 +281,7 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
               </button>
             </div>
           ) : null}
+          </div>
           </div>
         </div>
       </header>
