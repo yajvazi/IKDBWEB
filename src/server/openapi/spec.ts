@@ -4,7 +4,7 @@ import { internetKudoApiEndpoints, toInternetKudoPath } from "@/lib/internetkudo
 export function getOpenApiSpec() {
   const internetKudoApiTags = Array.from(new Set(internetKudoApiEndpoints.map((endpoint) => `InternetKudo - ${endpoint.tag}`)));
 
-  return {
+  const spec = {
     openapi: "3.1.0",
     info: {
       title: "InternetKudo API Gateway",
@@ -87,6 +87,15 @@ export function getOpenApiSpec() {
         Referral: { type: "object", properties: { code: { type: "string" }, status: { type: "string" } } },
         SupportTicket: { type: "object", properties: { id: { type: "string" }, subject: { type: "string" }, status: { type: "string" } } },
         Pagination: { type: "object", properties: { page: { type: "integer" }, pageSize: { type: "integer" }, total: { type: "integer" } } },
+        TenantContext: {
+          type: "object",
+          description: "InternetKudo routing context used to select server-side OCS reseller/account settings and Stripe credentials. Secrets are never exposed.",
+          properties: {
+            resellerId: { type: "integer", default: 567 },
+            accountId: { type: "integer", default: 3926 },
+            stripeProfileId: { type: "string", default: "internetkudo-platform" },
+          },
+        },
         CartQuoteRequest: {
           type: "object",
           required: ["planId"],
@@ -129,7 +138,7 @@ export function getOpenApiSpec() {
             accountId: { type: "integer", minimum: 1, description: "OCS accountForSubs value." },
             validityPeriod: { type: "integer", minimum: 1 },
           },
-          examples: [{ packageTemplateId: 553, accountId: 40, validityPeriod: 30 }],
+          examples: [{ packageTemplateId: 553, accountId: 3926, resellerId: 567, validityPeriod: 30 }],
         },
         OcsPackageAssignment: {
           type: "object",
@@ -358,12 +367,17 @@ export function getOpenApiSpec() {
           responses: openApiResponses(),
         },
       },
-      ...ringOpenApiPaths(),
+      ...internetKudoOpenApiPaths(),
     },
   };
+
+  (spec as { tags: Array<{ name: string }>; paths: Record<string, unknown> }).tags = internetKudoApiTags.map((name) => ({ name }));
+  (spec as { tags: Array<{ name: string }>; paths: Record<string, unknown> }).paths = internetKudoOpenApiPaths();
+
+  return spec;
 }
 
-function ringOpenApiPaths() {
+function internetKudoOpenApiPaths() {
   return internetKudoApiEndpoints.reduce<Record<string, Record<string, unknown>>>((paths, endpoint) => {
     const path = toInternetKudoPath(endpoint.path);
     paths[path] ??= {};
@@ -379,7 +393,12 @@ function ringOpenApiPaths() {
           required: true,
           content: {
             "application/json": {
-              schema: { type: "object", additionalProperties: true },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/TenantContext" },
+                  { type: "object", additionalProperties: true },
+                ],
+              },
             },
           },
         },

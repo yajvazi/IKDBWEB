@@ -776,7 +776,9 @@ function internetKudoOcsProxyCatalog() {
 }
 
 function internetKudoApiPayload(endpoint: InternetKudoApiEndpoint, input?: unknown) {
+  const tenant = resolveInternetKudoTenant(input);
   return {
+    platform: "internetkudo",
     compatibility: "internetkudo",
     operationId: endpoint.operationId,
     tag: endpoint.tag,
@@ -784,10 +786,40 @@ function internetKudoApiPayload(endpoint: InternetKudoApiEndpoint, input?: unkno
     internetKudoPath: `/api/v1${toInternetKudoPath(endpoint.path)}`,
     method: endpoint.method,
     status: "available",
-    mode: "compatibility",
+    mode: "gateway",
+    tenant,
     liveIntegration: liveIntegrationStatus(endpoint),
     input,
-    note: "This InternetKudo API endpoint is normalized behind the InternetKudo API Gateway and does not expose OCS credentials.",
+    note: "This InternetKudo API endpoint is normalized behind the InternetKudo API Gateway. OCS and Stripe credentials are selected server-side and never exposed.",
+  };
+}
+
+function resolveInternetKudoTenant(input?: unknown) {
+  const values = input instanceof URLSearchParams ? Object.fromEntries(input.entries()) : asRecord(input) ?? {};
+  const env = getEnv();
+  const resellerId = positiveNumber(values.resellerId)
+    ?? positiveNumber(values.resellerid)
+    ?? positiveNumber(env.OCS_RESELLER_ID)
+    ?? 567;
+  const accountId = positiveNumber(values.accountId)
+    ?? positiveNumber(values.accountid)
+    ?? positiveNumber(values.accountForSubs)
+    ?? positiveNumber(env.OCS_API_ACCOUNT_ID)
+    ?? 3926;
+  const stripeProfileId = typeof values.stripeProfileId === "string" && values.stripeProfileId.trim()
+    ? values.stripeProfileId.trim()
+    : "internetkudo-platform";
+
+  return {
+    owner: resellerId === 567 ? "InternetKudo" : "InternetKudo subreseller",
+    resellerId,
+    accountId,
+    stripeProfileId,
+    credentialScope: {
+      ocs: "server-side",
+      stripe: "server-side",
+    },
+    secretsExposed: false,
   };
 }
 

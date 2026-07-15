@@ -161,14 +161,15 @@ export function matchInternetKudoApiEndpoint(method: string, pathWithoutApiV1: s
 
 export function sampleBodyForInternetKudoEndpoint(endpoint: InternetKudoApiEndpoint) {
   if (endpoint.method === "GET" || endpoint.method === "DELETE") return undefined;
+  const tenant = { resellerId: 567, accountId: 3926, stripeProfileId: "internetkudo-platform" };
   if (endpoint.path.includes("auth/login")) return { email: "customer@example.com", password: "Password123!" };
-  if (endpoint.path.includes("payments/create-intent")) return { amount: 1499, currency: "EUR", orderId: "ord_demo" };
-  if (endpoint.path.includes("orders/topup")) return { iccid: "8948010000074618117", packageTemplateId: 553 };
-  if (endpoint.path.includes("orders")) return { packageTemplateId: 553, quantity: 1, currency: "EUR" };
-  if (endpoint.path.includes("promo-codes")) return { code: "KUDO123", orderId: "ord_demo" };
-  if (endpoint.path.includes("credits")) return { amount: 100, currency: "EUR", reason: "Demo" };
-  if (endpoint.path.includes("cart")) return { packageTemplateId: 553, quantity: 1, promoCode: "KUDO123" };
-  if (endpoint.path.includes("notifications")) return { title: "InternetKudo", body: "Your eSIM is ready." };
-  if (endpoint.path.includes("resellers")) return { resellerId: 567, amount: 100 };
-  return { example: true };
+  if (endpoint.path.includes("payments/create-intent")) return { ...tenant, amount: 1499, currency: "EUR", orderId: "ord_demo" };
+  if (endpoint.path.includes("orders/topup")) return { ...tenant, iccid: "8948010000074618117", packageTemplateId: 553 };
+  if (endpoint.path.includes("orders")) return { ...tenant, packageTemplateId: 553, quantity: 1, currency: "EUR" };
+  if (endpoint.path.includes("promo-codes")) return { ...tenant, code: "KUDO123", orderId: "ord_demo" };
+  if (endpoint.path.includes("credits")) return { ...tenant, amount: 100, currency: "EUR", reason: "Demo" };
+  if (endpoint.path.includes("cart")) return { ...tenant, packageTemplateId: 553, quantity: 1, promoCode: "KUDO123" };
+  if (endpoint.path.includes("notifications")) return { ...tenant, title: "InternetKudo", body: "Your eSIM is ready." };
+  if (endpoint.path.includes("resellers")) return { ...tenant, amount: 100 };
+  return { ...tenant, example: true };
 }

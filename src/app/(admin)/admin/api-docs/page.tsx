@@ -81,7 +81,7 @@ const endpoints: Endpoint[] = [
     path: "/api/v1/ocs/package-assignments",
     summary: "Assign an OCS package template to an account with affectPackageToSubscriber",
     safeTry: false,
-    body: { packageTemplateId: 553, accountId: 40, validityPeriod: 30 },
+    body: { packageTemplateId: 553, accountId: 3926, resellerId: 567, validityPeriod: 30 },
   },
   { group: "OCS Admin", method: "GET", path: "/api/admin/ocs/creation?resource=overview", summary: "Pull live OCS inventory", safeTry: true },
   { group: "OCS Admin", method: "GET", path: "/api/admin/ocs/commands", summary: "Documented OCS command catalog", safeTry: true },
@@ -109,21 +109,23 @@ const endpoints: Endpoint[] = [
   })),
 ];
 
-const groups = Array.from(new Set(endpoints.map((endpoint) => endpoint.group)));
+const docsEndpoints = endpoints.filter((endpoint) => endpoint.group.startsWith("InternetKudo -"));
+const defaultEndpoint = docsEndpoints[0] ?? endpoints[0];
+const groups = Array.from(new Set(docsEndpoints.map((endpoint) => endpoint.group)));
 
 export default function ApiDocsPage() {
   const [query, setQuery] = useState("");
-  const [activeGroup, setActiveGroup] = useState("Website");
-  const [selectedPath, setSelectedPath] = useState("/api/v1/public-packages");
+  const [activeGroup, setActiveGroup] = useState(defaultEndpoint.group);
+  const [selectedPath, setSelectedPath] = useState(defaultEndpoint.path);
   const [token, setToken] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [response, setResponse] = useState("");
   const [copied, setCopied] = useState("");
 
-  const selected = endpoints.find((endpoint) => endpoint.path === selectedPath) ?? endpoints[0];
+  const selected = docsEndpoints.find((endpoint) => endpoint.path === selectedPath) ?? defaultEndpoint;
   const visibleEndpoints = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return endpoints.filter((endpoint) => {
+    return docsEndpoints.filter((endpoint) => {
       const matchesGroup = activeGroup === endpoint.group;
       const matchesSearch = !normalized || `${endpoint.group} ${endpoint.method} ${endpoint.path} ${endpoint.summary}`.toLowerCase().includes(normalized);
       return matchesGroup && matchesSearch;
@@ -186,7 +188,7 @@ export default function ApiDocsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold tracking-tight text-slate-950">Swagger Docs</h1>
-        <p className="mt-1 text-sm text-slate-500">OpenAPI 3.1 documentation, examples, code snippets, and safe try-it-out for InternetKudo and OCS admin APIs.</p>
+        <p className="mt-1 text-sm text-slate-500">OpenAPI 3.1 documentation, examples, code snippets, and safe try-it-out for InternetKudo API groups only.</p>
       </div>
 
       <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">
@@ -216,7 +218,11 @@ export default function ApiDocsPage() {
                 <button
                   key={group}
                   className={`block w-full rounded-md px-3 py-2 text-left text-sm font-medium ${activeGroup === group ? "bg-primary text-white" : "text-slate-600 hover:bg-white"}`}
-                  onClick={() => setActiveGroup(group)}
+                  onClick={() => {
+                    setActiveGroup(group);
+                    const firstEndpoint = docsEndpoints.find((endpoint) => endpoint.group === group);
+                    if (firstEndpoint) selectEndpoint(firstEndpoint);
+                  }}
                 >
                   {group}
                 </button>
