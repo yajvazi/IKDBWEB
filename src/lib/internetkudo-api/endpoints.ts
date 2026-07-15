@@ -147,6 +147,52 @@ export function internetKudoDocsPath(apiPath: string) {
   return `/api/v1${toInternetKudoPath(apiPath)}`;
 }
 
+export function internetKudoTryPath(apiPath: string) {
+  return internetKudoDocsPath(apiPath)
+    .replace("{iso2}", "TR")
+    .replace("{zoneId}", "Turkey")
+    .replace("{id}", "demo")
+    .replace("{templateId}", "553")
+    .replace("{orderId}", "ord_demo")
+    .replace("{userId}", "cus_demo");
+}
+
+const liveInternetKudoApiPaths = new Set([
+  "/api",
+  "/api/health",
+  "/api/ocs/list",
+  "/api/zones/detailed",
+  "/api/zones/detailed/by-iso2",
+  "/api/zones/detailed/by-package-template",
+  "/api/packages/sync",
+  "/api/packages/details",
+  "/api/esim/destinations",
+  "/api/esim/destinations/country/{iso2}/packages",
+  "/api/esim/destinations/region/{zoneId}/packages",
+  "/api/orders/test-ocs",
+  "/api/payments/create-intent",
+  "/api/api/stats/dashboard",
+  "/api/api/stats/money-flow",
+  "/api/api/stats/used-countries",
+  "/api/api/stats/top-esims",
+  "/api/api/stats/esims",
+  "/api/api/stats/orders",
+  "/api/api/stats/users",
+]);
+
+export function isInternetKudoApiEndpointLive(endpoint: InternetKudoApiEndpoint) {
+  return liveInternetKudoApiPaths.has(endpoint.path);
+}
+
+export function isInternetKudoApiEndpointSafeToTry(endpoint: InternetKudoApiEndpoint) {
+  if (!isInternetKudoApiEndpointLive(endpoint)) return false;
+  return !endpoint.path.includes("/process")
+    && !endpoint.path.includes("/topup")
+    && !endpoint.path.includes("/adjust")
+    && !endpoint.path.includes("/refund")
+    && !endpoint.path.includes("/webhook");
+}
+
 export function matchInternetKudoApiEndpoint(method: string, pathWithoutApiV1: string) {
   const normalizedPath = `/${pathWithoutApiV1}`.replace(/\/+$/, "") || "/";
   return internetKudoApiEndpoints.find((endpoint) => {
@@ -163,7 +209,10 @@ export function sampleBodyForInternetKudoEndpoint(endpoint: InternetKudoApiEndpo
   if (endpoint.method === "GET" || endpoint.method === "DELETE") return undefined;
   const tenant = { resellerId: 567, accountId: 3926, stripeProfileId: "internetkudo-platform" };
   if (endpoint.path.includes("auth/login")) return { email: "customer@example.com", password: "Password123!" };
-  if (endpoint.path.includes("payments/create-intent")) return { ...tenant, amount: 1499, currency: "EUR", orderId: "ord_demo" };
+  if (endpoint.path.includes("payments/create-intent")) return { ...tenant, packageId: "pkg_1657099", price: "14.99", currency: "EUR" };
+  if (endpoint.path.includes("zones/detailed")) return { ...tenant };
+  if (endpoint.path.includes("packages/sync")) return { ...tenant };
+  if (endpoint.path.includes("orders/test-ocs")) return { ...tenant };
   if (endpoint.path.includes("orders/topup")) return { ...tenant, iccid: "8948010000074618117", packageTemplateId: 553 };
   if (endpoint.path.includes("orders")) return { ...tenant, packageTemplateId: 553, quantity: 1, currency: "EUR" };
   if (endpoint.path.includes("promo-codes")) return { ...tenant, code: "KUDO123", orderId: "ord_demo" };

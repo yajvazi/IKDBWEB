@@ -4,7 +4,13 @@ import { Copy, Play, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/lib/toastify";
-import { internetKudoApiEndpoints, internetKudoDocsPath, sampleBodyForInternetKudoEndpoint } from "@/lib/internetkudo-api/endpoints";
+import {
+  internetKudoApiEndpoints,
+  internetKudoTryPath,
+  isInternetKudoApiEndpointLive,
+  isInternetKudoApiEndpointSafeToTry,
+  sampleBodyForInternetKudoEndpoint,
+} from "@/lib/internetkudo-api/endpoints";
 
 type Endpoint = {
   group: string;
@@ -102,14 +108,15 @@ const endpoints: Endpoint[] = [
   ...internetKudoApiEndpoints.map((endpoint) => ({
     group: `InternetKudo - ${endpoint.tag}`,
     method: endpoint.method,
-    path: internetKudoDocsPath(endpoint.path),
+    path: internetKudoTryPath(endpoint.path),
     summary: endpoint.summary,
-    safeTry: !endpoint.path.includes("/webhook") && !endpoint.path.includes("/process") && !endpoint.path.includes("/topup") && !endpoint.path.includes("/balance") && !endpoint.path.includes("/adjust") && !endpoint.path.includes("/refund"),
+    safeTry: isInternetKudoApiEndpointSafeToTry(endpoint),
     body: sampleBodyForInternetKudoEndpoint(endpoint),
   })),
 ];
 
-const docsEndpoints = endpoints.filter((endpoint) => endpoint.group.startsWith("InternetKudo -"));
+const liveDocsPaths = new Set(internetKudoApiEndpoints.filter(isInternetKudoApiEndpointLive).map((endpoint) => internetKudoTryPath(endpoint.path)));
+const docsEndpoints = endpoints.filter((endpoint) => endpoint.group.startsWith("InternetKudo -") && liveDocsPaths.has(endpoint.path));
 const defaultEndpoint = docsEndpoints[0] ?? endpoints[0];
 const groups = Array.from(new Set(docsEndpoints.map((endpoint) => endpoint.group)));
 
@@ -188,7 +195,7 @@ export default function ApiDocsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold tracking-tight text-slate-950">Swagger Docs</h1>
-        <p className="mt-1 text-sm text-slate-500">OpenAPI 3.1 documentation, examples, code snippets, and safe try-it-out for InternetKudo API groups only.</p>
+        <p className="mt-1 text-sm text-slate-500">OpenAPI 3.1 documentation and safe try-it-out for live InternetKudo API Gateway routes only.</p>
       </div>
 
       <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">

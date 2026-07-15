@@ -1,8 +1,8 @@
 import { ocsCommandCatalog } from "@/lib/ocs/catalog";
-import { internetKudoApiEndpoints, toInternetKudoPath } from "@/lib/internetkudo-api/endpoints";
+import { internetKudoApiEndpoints, isInternetKudoApiEndpointLive, toInternetKudoPath } from "@/lib/internetkudo-api/endpoints";
 
 export function getOpenApiSpec() {
-  const internetKudoApiTags = Array.from(new Set(internetKudoApiEndpoints.map((endpoint) => `InternetKudo - ${endpoint.tag}`)));
+  const internetKudoApiTags = Array.from(new Set(internetKudoApiEndpoints.filter(isInternetKudoApiEndpointLive).map((endpoint) => `InternetKudo - ${endpoint.tag}`)));
 
   const spec = {
     openapi: "3.1.0",
@@ -378,7 +378,7 @@ export function getOpenApiSpec() {
 }
 
 function internetKudoOpenApiPaths() {
-  return internetKudoApiEndpoints.reduce<Record<string, Record<string, unknown>>>((paths, endpoint) => {
+  return internetKudoApiEndpoints.filter(isInternetKudoApiEndpointLive).reduce<Record<string, Record<string, unknown>>>((paths, endpoint) => {
     const path = toInternetKudoPath(endpoint.path);
     paths[path] ??= {};
     paths[path][endpoint.method.toLowerCase()] = {

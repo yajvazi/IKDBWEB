@@ -16,6 +16,7 @@ import { OcsApiError, ocsErrorDescriptions } from "@/server/ocs/errors";
 import { getOcsClient } from "@/server/ocs/client";
 import { getCurrentAdmin } from "@/server/auth/admin-auth";
 import { getPublicPlans } from "@/server/supabase/packages";
+import { getDashboardAnalytics, getDashboardKpis, getStripeOrdersWorkspaceConfig } from "@/server/stripe/live-data";
 import { ocsCommandCatalog } from "@/lib/ocs/catalog";
 import { matchInternetKudoApiEndpoint, toInternetKudoPath, type InternetKudoApiEndpoint } from "@/lib/internetkudo-api/endpoints";
 import { checkRateLimit } from "@/server/security/rate-limit";
@@ -175,6 +176,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return handleOcsGet(request, segments.slice(1));
   }
 
+  if (path === "") {
+    return ok({ service: "internetkudo-api-gateway", status: "ok", version: "v1", mode: getEnv().OCS_MOCK_MODE ? "mock" : "live" });
+  }
+
   if (path === "health") {
     return ok({ service: "internetkudo-api-gateway", status: "ok", timestamp: new Date().toISOString() });
   }
@@ -207,6 +212,48 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (path === "byop/operators") {
     return ok(websiteByopOperators());
+  }
+
+  if (path === "packages/details") {
+    const plans = await getMobilePlans();
+    return ok({
+      source: plans.some((plan) => plan.source === "supabase") ? "supabase" : "admin-package-records",
+      total: plans.length,
+      packages: plans.map(planDetail),
+    });
+  }
+
+  if (segments[0] === "esim" && segments[1] === "destinations") {
+    const plans = await getMobilePlans();
+    if (segments[2] === "country" && segments[3] && segments[4] === "packages") {
+      const country = countryByCodeOrName(plans, segments[3]);
+      const countryPlans = plans.filter((plan) => sameCountry(plan.country, country?.name ?? segments[3]));
+      return ok({ country: country ?? { code: segments[3].toUpperCase(), name: segments[3], planCount: countryPlans.length, popular: false }, packages: countryPlans.map(planDetail) });
+    }
+    if (segments[2] === "region" && segments[3] && segments[4] === "packages") {
+      const region = decodeURIComponent(segments[3]).toLowerCase();
+      const regionPlans = plans.filter((plan) => plan.region.toLowerCase() === region || String(plan.templateId ?? "").toLowerCase() === region);
+      return ok({ region: segments[3], packages: regionPlans.map(planDetail) });
+    }
+    return ok({ destinations: countriesFromPlans(plans), totalPackages: plans.length });
+  }
+
+  if (path === "zones/detailed/by-iso2") {
+    const plans = await getMobilePlans();
+    const iso2 = request.nextUrl.searchParams.get("iso2");
+    const countries = countriesFromPlans(plans);
+    return ok(iso2 ? countries.filter((country) => country.code.toLowerCase() === iso2.toLowerCase()) : countries);
+  }
+
+  if (path === "zones/detailed/by-package-template") {
+    const plans = await getMobilePlans();
+    const packageTemplateId = request.nextUrl.searchParams.get("packageTemplateId") ?? request.nextUrl.searchParams.get("templateId");
+    const filteredPlans = packageTemplateId ? plans.filter((plan) => String(plan.templateId ?? "") === packageTemplateId) : plans;
+    return ok({ packageTemplateId: packageTemplateId ?? null, zones: countriesFromPlans(filteredPlans), packages: filteredPlans.map(planDetail) });
+  }
+
+  if (path.startsWith("api/stats/")) {
+    return handleInternetKudoStats(path);
   }
 
   if (path === "app/bootstrap") {
@@ -360,9 +407,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (path === "support/tickets") return ok([{ id: "ticket_1", subject: "Install help", status: "open", lastUpdated: "2026-05-31T10:44:00Z" }]);
 
   const internetKudoEndpoint = matchInternetKudoApiEndpoint("GET", path);
-  if (internetKudoEndpoint) return ok(internetKudoApiPayload(internetKudoEndpoint, request.nextUrl.searchParams));
+  if (internetKudoEndpoint) return internetKudoNotImplemented(internetKudoEndpoint, request.nextUrl.searchParams);
 
-  return ok({ route: `/${path}`, mode: "mock", message: "InternetKudo API Gateway mock endpoint. Live adapter is intentionally not enabled." });
+  return fail("ROUTE_NOT_FOUND", "This InternetKudo API Gateway route is not implemented.", 404);
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ segments?: string[] }> }) {
@@ -411,6 +458,65 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const parsed = websiteByopQuoteSchema.safeParse(body);
     if (!parsed.success) return fail("VALIDATION_ERROR", "BYOP quote payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
     return ok(websiteByopQuote(parsed.data));
+  }
+
+  if (path === "payments/create-intent") {
+    const record = asRecord(body) ?? {};
+    const price = typeof record.price === "string" || typeof record.price === "number"
+      ? String(record.price)
+      : typeof record.amount === "string" || typeof record.amount === "number"
+        ? String(Number(record.amount) / 100)
+        : "";
+    const parsed = websitePaymentIntentSchema.safeParse({
+      ...record,
+      price,
+      currency: typeof record.currency === "string" ? record.currency : "EUR",
+    });
+    if (!parsed.success) return fail("VALIDATION_ERROR", "Payment intent payload is invalid.", 400, z.flattenError(parsed.error).fieldErrors);
+    return createWebsitePaymentIntent(parsed.data);
+  }
+
+  if (path === "zones/detailed") {
+    const accessError = await requireOcsProxyAccess(request);
+    if (accessError) return accessError;
+    const record = asRecord(body) ?? {};
+    const resellerId = positiveNumber(record.resellerId) ?? positiveNumber(record.resellerid) ?? positiveNumber(getEnv().OCS_RESELLER_ID);
+    if (!resellerId) return fail("INVALID_RESELLER_ID", "A reseller ID is required for this OCS route.", 400);
+    try {
+      return ok(await getOcsClient().executeCommand(listDetailedLocationZoneCommand(resellerId)));
+    } catch (error) {
+      return handleOcsProxyError(error);
+    }
+  }
+
+  if (path === "packages/sync") {
+    const accessError = await requireOcsProxyAccess(request);
+    if (accessError) return accessError;
+    const record = asRecord(body) ?? {};
+    const resellerId = positiveNumber(record.resellerId) ?? positiveNumber(record.resellerid) ?? positiveNumber(getEnv().OCS_RESELLER_ID);
+    if (!resellerId) return fail("INVALID_RESELLER_ID", "A reseller ID is required for package sync.", 400);
+    try {
+      const [upstream, localPlans] = await Promise.all([
+        getOcsClient().executeCommand(listPrepaidPackageTemplateCommand({ resellerId })),
+        getMobilePlans(),
+      ]);
+      return ok({ status: "completed", resellerId, upstream, localPackageCount: localPlans.length, syncedAt: new Date().toISOString() });
+    } catch (error) {
+      return handleOcsProxyError(error);
+    }
+  }
+
+  if (path === "orders/test-ocs") {
+    const accessError = await requireOcsProxyAccess(request);
+    if (accessError) return accessError;
+    const record = asRecord(body) ?? {};
+    const resellerId = positiveNumber(record.resellerId) ?? positiveNumber(record.resellerid) ?? positiveNumber(getEnv().OCS_RESELLER_ID);
+    try {
+      const resellerInfo = await getOcsClient().executeCommand(getResellerInfoCommand(resellerId ? { id: resellerId } : {}));
+      return ok({ status: "connected", mode: getEnv().OCS_MOCK_MODE ? "mock" : "live", resellerInfo, checkedAt: new Date().toISOString() });
+    } catch (error) {
+      return handleOcsProxyError(error);
+    }
   }
 
   if (path === "newsletter") {
@@ -513,9 +619,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const internetKudoEndpoint = matchInternetKudoApiEndpoint("POST", path);
-  if (internetKudoEndpoint) return ok(internetKudoApiPayload(internetKudoEndpoint, body), internetKudoEndpoint.path.includes("webhook") ? 200 : 202);
+  if (internetKudoEndpoint) return internetKudoNotImplemented(internetKudoEndpoint, body);
 
-  return ok({ route: `/${path}`, accepted: true, mode: "mock" }, 202);
+  return fail("ROUTE_NOT_FOUND", "This InternetKudo API Gateway route is not implemented.", 404);
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ segments?: string[] }> }) {
@@ -538,9 +644,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const internetKudoEndpoint = matchInternetKudoApiEndpoint("PATCH", path);
-  if (internetKudoEndpoint) return ok(internetKudoApiPayload(internetKudoEndpoint, body));
+  if (internetKudoEndpoint) return internetKudoNotImplemented(internetKudoEndpoint, body);
 
-  return ok({ route: `/${path}`, updated: true, mode: "mock" });
+  return fail("ROUTE_NOT_FOUND", "This InternetKudo API Gateway route is not implemented.", 404);
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ segments?: string[] }> }) {
@@ -552,7 +658,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   }
 
   const internetKudoEndpoint = matchInternetKudoApiEndpoint("DELETE", path);
-  if (internetKudoEndpoint) return ok(internetKudoApiPayload(internetKudoEndpoint, { deleted: true }));
+  if (internetKudoEndpoint) return internetKudoNotImplemented(internetKudoEndpoint, { deleted: true });
 
   return fail("ROUTE_NOT_FOUND", "This delete route is not defined.", 404);
 }
@@ -593,6 +699,14 @@ async function handleOcsGet(request: NextRequest, segments: string[]) {
           version: item.version,
           description: item.description,
         })),
+      });
+    }
+
+    if (resource === "list") {
+      return ok({
+        entries: internetKudoOcsProxyCatalog(),
+        mode: env.OCS_MOCK_MODE ? "mock" : "live",
+        upstreamConfigured: Boolean(env.OCS_API_BASE_URL),
       });
     }
 
@@ -775,23 +889,53 @@ function internetKudoOcsProxyCatalog() {
   ];
 }
 
-function internetKudoApiPayload(endpoint: InternetKudoApiEndpoint, input?: unknown) {
-  const tenant = resolveInternetKudoTenant(input);
-  return {
-    platform: "internetkudo",
-    compatibility: "internetkudo",
-    operationId: endpoint.operationId,
-    tag: endpoint.tag,
-    apiPath: endpoint.path,
-    internetKudoPath: `/api/v1${toInternetKudoPath(endpoint.path)}`,
-    method: endpoint.method,
-    status: "available",
-    mode: "gateway",
-    tenant,
-    liveIntegration: liveIntegrationStatus(endpoint),
-    input,
-    note: "This InternetKudo API endpoint is normalized behind the InternetKudo API Gateway. OCS and Stripe credentials are selected server-side and never exposed.",
-  };
+function internetKudoNotImplemented(endpoint: InternetKudoApiEndpoint, input?: unknown) {
+  return fail(
+    "INTERNETKUDO_ROUTE_NOT_LIVE",
+    "This InternetKudo API contract is documented for the mobile app or future subreseller platform, but it is not connected to a live production adapter yet.",
+    501,
+    {
+      route: [`${endpoint.method} /api/v1${toInternetKudoPath(endpoint.path)}`],
+      operationId: [endpoint.operationId],
+      tenant: [JSON.stringify(resolveInternetKudoTenant(input))],
+    },
+  );
+}
+
+async function handleInternetKudoStats(path: string) {
+  const [kpis, analytics] = await Promise.all([
+    getDashboardKpis(),
+    getDashboardAnalytics(),
+  ]);
+  const orders = path.endsWith("/orders") ? await getStripeOrdersWorkspaceConfig().catch(() => null) : null;
+
+  if (path === "api/stats/dashboard") {
+    return ok({ kpis, analytics });
+  }
+  if (path === "api/stats/money-flow") {
+    return ok({
+      revenueOverTime: analytics.revenueSeries,
+      refundMinor: analytics.refundMinor,
+      source: "stripe",
+    });
+  }
+  if (path === "api/stats/used-countries") {
+    return ok({ countries: analytics.countrySales });
+  }
+  if (path === "api/stats/top-esims") {
+    return ok({ esims: [], note: "Live eSIM ranking requires persisted eSIM usage records." });
+  }
+  if (path === "api/stats/esims") {
+    return ok({ active: kpis.find((item) => item.label === "Active eSIMs")?.value ?? "0", usage: [], note: "Live eSIM usage requires persisted OCS usage snapshots." });
+  }
+  if (path === "api/stats/orders") {
+    return ok({ summary: orders?.summary ?? [], records: orders?.records ?? [] });
+  }
+  if (path === "api/stats/users") {
+    return ok({ customerMix: analytics.customerMix });
+  }
+
+  return fail("STATS_ROUTE_NOT_FOUND", "This stats route is not implemented.", 404);
 }
 
 function resolveInternetKudoTenant(input?: unknown) {
@@ -821,13 +965,6 @@ function resolveInternetKudoTenant(input?: unknown) {
     },
     secretsExposed: false,
   };
-}
-
-function liveIntegrationStatus(endpoint: InternetKudoApiEndpoint) {
-  if (endpoint.path.includes("/payments/create-intent")) return "Use /api/v1/create-payment-intent or /api/v1/checkout/payment-intent for live Stripe PaymentIntent creation.";
-  if (endpoint.path.includes("/orders") && (endpoint.path.includes("/process") || endpoint.path.includes("/topup"))) return "Use /api/v1/orders/complete or /api/v1/iccid/topup for live Stripe-verified OCS provisioning.";
-  if (endpoint.path.includes("/ocs") || endpoint.path.includes("/zones") || endpoint.path.includes("/packages")) return "Use /api/v1/ocs/* and /api/admin/ocs/* for live OCS proxy operations.";
-  return "Compatibility adapter response. Persistent data integration can be attached without changing the client route contract.";
 }
 
 async function websiteSystemStatus() {
