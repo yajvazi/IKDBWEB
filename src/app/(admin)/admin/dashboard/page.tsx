@@ -11,6 +11,7 @@ import {
   RevenueAreaChart,
 } from "@/components/charts/dashboard-charts";
 import { requireAdminPageAccess } from "@/server/auth/admin-access";
+import { SubresellerTopupWidget } from "@/components/admin/subreseller-topup-widget";
 
 function Card({ title, action, children, className = "" }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
@@ -42,6 +43,8 @@ export default async function DashboardPage() {
         </div>
         <DashboardActionBar />
       </div>
+
+      <SubresellerTopupWidget variant="dashboard" />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
         {kpis.map((metric) => (

@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { navItems } from "@/components/admin/admin-sidebar";
 import { StatusBadge } from "@/components/admin/status-badge";
+import { SubresellerBalanceLabel, SubresellerTopupWidget } from "@/components/admin/subreseller-topup-widget";
 import { cn } from "@/lib/utils";
 
 type HeaderAdmin = {
@@ -218,6 +219,7 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
             <div className="hidden text-right sm:block">
               <div className="text-xs font-bold text-slate-900">{admin.name}</div>
               <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{roleLabel(admin.role)}</div>
+              <SubresellerBalanceLabel />
             </div>
             <div className="grid h-7 w-7 place-items-center rounded-full bg-primary text-[11px] font-bold text-white" aria-label="Admin profile">
               {initials(admin)}
@@ -237,6 +239,7 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
                   {roleLabel(admin.role)}
                 </StatusBadge>
               </div>
+              <SubresellerTopupWidget variant="menu" />
               <Link
                 role="menuitem"
                 href="/admin/users"

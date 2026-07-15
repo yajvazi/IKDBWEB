@@ -87,6 +87,27 @@ export async function listSubresellerTopups(limit = 30): Promise<SubresellerTopu
   return rows.map(topupFromRow);
 }
 
+export async function getSubresellerTopupForReseller(input: {
+  topupId: string;
+  resellerId: string;
+}): Promise<SubresellerTopup | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  const rows = await db`
+    select
+      t.*,
+      r.name as reseller_name
+    from subreseller_topups t
+    join resellers r on r.id = t.reseller_id
+    where t.id = ${input.topupId}
+      and t.reseller_id = ${input.resellerId}
+    limit 1
+  `;
+
+  return rows[0] ? topupFromRow(rows[0]) : null;
+}
+
 export async function createSubresellerTopupPaymentIntent(input: {
   resellerId: string;
   amountMinor: number;

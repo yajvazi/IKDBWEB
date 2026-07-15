@@ -20,3 +20,11 @@ export function stripeSecretForMode(mode: StripeRuntimeMode) {
   }
   return secret;
 }
+
+export function getStripePublishableKey(mode: StripeRuntimeMode) {
+  const key = mode === "test" ? process.env.NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY : process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  if (!key) {
+    throw new Error(mode === "test" ? "NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY is required for test-mode Stripe payments." : "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is required for Stripe payments.");
+  }
+  return key;
+}
