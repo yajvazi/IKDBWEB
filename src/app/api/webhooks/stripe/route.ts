@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getProvisioningQueue } from "@/server/jobs/queue";
 import { constructStripeWebhookEvent, supportedStripeWebhookEvents } from "@/server/stripe/webhooks";
+import { handleSubresellerTopupPaymentSucceeded } from "@/server/subresellers/topups";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,9 @@ async function handleStripeEvent(event: Stripe.Event, requestId: string) {
   switch (event.type) {
     case "payment_intent.succeeded": {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      const topupResult = await handleSubresellerTopupPaymentSucceeded(paymentIntent, requestId);
+      if (topupResult.handled) return;
+
       const orderId = paymentIntent.metadata?.orderId;
       if (orderId) {
         await getProvisioningQueue().enqueueProvisioning({

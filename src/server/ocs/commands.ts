@@ -101,6 +101,16 @@ export function affectPackageToSubscriberCommand(input: {
   return ocsCommand("affectPackageToSubscriber", input);
 }
 
+export function modifyResellerBalanceCommand(input: {
+  resellerId: number;
+  type: string;
+  amount: number;
+  setBalance?: boolean;
+  description?: string;
+}) {
+  return ocsCommand("modifyResellerBalance", input);
+}
+
 export function moveSubscriberRangeToAccountCommand(input: {
   rangeType: "IMSI" | "ICCID";
   rangeStart: string;

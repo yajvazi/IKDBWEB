@@ -1,4 +1,4 @@
-import { getStripeClient } from "@/server/stripe/client";
+import { getStripeClient, type StripeRuntimeMode } from "@/server/stripe/client";
 
 export const supportedStripeWebhookEvents = [
   "payment_intent.succeeded",
@@ -11,7 +11,24 @@ export const supportedStripeWebhookEvents = [
 ] as const;
 
 export function constructStripeWebhookEvent(payload: string | Buffer, signature: string) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET is required for webhook verification.");
-  return getStripeClient().webhooks.constructEvent(payload, signature, secret);
+  const rawCandidates: Array<{ mode: StripeRuntimeMode; secret?: string }> = [
+    { mode: "live", secret: process.env.STRIPE_WEBHOOK_SECRET },
+    { mode: "test", secret: process.env.STRIPE_TEST_WEBHOOK_SECRET },
+  ];
+  const candidates = rawCandidates.filter((candidate): candidate is { mode: StripeRuntimeMode; secret: string } => Boolean(candidate.secret));
+
+  if (candidates.length === 0) {
+    throw new Error("STRIPE_WEBHOOK_SECRET is required for webhook verification.");
+  }
+
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      return getStripeClient(candidate.mode).webhooks.constructEvent(payload, signature, candidate.secret!);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Stripe webhook signature verification failed.");
 }
