@@ -1,18 +1,25 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { adminDateRanges, defaultAdminDateRange, normalizeAdminDateRange, setDateRangeSearchParam } from "@/lib/dates/admin-date-range";
 import { showToast } from "@/lib/toastify";
 
 export function AnalyticsControls() {
-  const [dateRange, setDateRange] = useState("Last 30 days");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const dateRange = normalizeAdminDateRange(searchParams.get("range"));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [country, setCountry] = useState("All countries");
   const [platform, setPlatform] = useState("All platforms");
   const updateDateRange = (value: string) => {
-    setDateRange(value);
-    showToast(`Analytics date range set to ${value}.`, "info");
+    const nextRange = normalizeAdminDateRange(value);
+    router.push(`${pathname}?${setDateRangeSearchParam(searchParams, nextRange).toString()}`);
+    router.refresh();
+    showToast(`Analytics date range set to ${nextRange}.`, "info");
   };
 
   return (
@@ -23,7 +30,7 @@ export function AnalyticsControls() {
         onChange={(event) => updateDateRange(event.target.value)}
         aria-label="Analytics date range"
       >
-        {["Today", "Last 7 days", "Last 30 days", "Last 90 days", "Current month", "Previous month"].map((range) => (
+        {adminDateRanges.map((range) => (
           <option key={range}>{range}</option>
         ))}
       </select>
@@ -35,7 +42,8 @@ export function AnalyticsControls() {
         variant="outline"
         size="sm"
         onClick={() => {
-          setDateRange("Last 30 days");
+          router.push(`${pathname}?${setDateRangeSearchParam(searchParams, defaultAdminDateRange).toString()}`);
+          router.refresh();
           setCountry("All countries");
           setPlatform("All platforms");
           setFiltersOpen(false);
@@ -56,7 +64,7 @@ export function AnalyticsControls() {
               onInput={(event) => updateDateRange(event.currentTarget.value)}
               aria-label="Analytics filter date range"
             >
-              {["Today", "Last 7 days", "Last 30 days", "Last 90 days", "Current month", "Previous month"].map((range) => (
+              {adminDateRanges.map((range) => (
                 <option key={range}>{range}</option>
               ))}
             </select>

@@ -14,6 +14,7 @@ import { requireAdminPageAccess } from "@/server/auth/admin-access";
 import { SubresellerTopupWidget } from "@/components/admin/subreseller-topup-widget";
 import { SubresellerStripeConnectCard } from "@/components/admin/subreseller-stripe-connect-card";
 import { getOcsDashboardStats, type OcsDashboardStats } from "@/server/ocs/dashboard-stats";
+import { normalizeAdminDateRange } from "@/lib/dates/admin-date-range";
 
 function Card({ title, action, children, className = "" }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
@@ -30,8 +31,10 @@ function Card({ title, action, children, className = "" }: { title: string; acti
 export const revalidate = 300;
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const { admin, policy } = await requireAdminPageAccess("dashboard");
+  const { range: rangeParam } = await searchParams;
+  const dateRange = normalizeAdminDateRange(rangeParam);
 
   if (admin.role !== "super_admin") {
     const ocsStats = await getOcsDashboardStats({
@@ -75,8 +78,8 @@ export default async function DashboardPage() {
   }
 
   const [kpis, analytics, ocsStats] = await Promise.all([
-    getDashboardKpis(),
-    getDashboardAnalytics(),
+    getDashboardKpis(dateRange),
+    getDashboardAnalytics(dateRange),
     getOcsDashboardStats(),
   ]);
 

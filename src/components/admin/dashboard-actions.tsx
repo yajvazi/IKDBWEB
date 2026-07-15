@@ -1,14 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Check, Download, Filter, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { adminDateRanges, normalizeAdminDateRange, setDateRangeSearchParam } from "@/lib/dates/admin-date-range";
 import { showToast } from "@/lib/toastify";
 
-const dateRanges = ["Today", "Last 7 days", "Last 30 days", "Last 90 days", "Current month", "Previous month"];
-
 export function DashboardActionBar() {
-  const [dateRange, setDateRange] = useState("Last 30 days");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const dateRange = normalizeAdminDateRange(searchParams.get("range"));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [status, setStatus] = useState("All statuses");
@@ -47,14 +50,15 @@ export function DashboardActionBar() {
         </Button>
         {dateOpen ? (
           <div role="menu" className="absolute right-0 top-9 z-20 w-48 rounded-lg border border-border bg-white p-2 shadow-xl">
-            {dateRanges.map((range) => (
+            {adminDateRanges.map((range) => (
               <button
                 key={range}
                 role="menuitem"
                 className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-primary"
                 onClick={() => {
-                  setDateRange(range);
                   setDateOpen(false);
+                  router.push(`${pathname}?${setDateRangeSearchParam(searchParams, range).toString()}`);
+                  router.refresh();
                   showToast(`Date range set to ${range}.`, "info");
                 }}
               >

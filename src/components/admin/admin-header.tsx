@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CalendarDays,
@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { navItems } from "@/components/admin/admin-sidebar";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { SubresellerBalanceLabel, SubresellerTopupWidget } from "@/components/admin/subreseller-topup-widget";
+import { adminDateRanges, normalizeAdminDateRange, setDateRangeSearchParam } from "@/lib/dates/admin-date-range";
 import { cn } from "@/lib/utils";
 
 type HeaderAdmin = {
@@ -41,11 +42,12 @@ function initials(admin: HeaderAdmin) {
 export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [dateRange, setDateRange] = useState("Last 30 days");
+  const dateRange = useMemo(() => normalizeAdminDateRange(searchParams.get("range")), [searchParams]);
   const [globalSearch, setGlobalSearch] = useState("");
   const [signingOut, setSigningOut] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -153,14 +155,15 @@ export function AdminHeader({ admin }: { admin: HeaderAdmin }) {
           </button>
           {dateOpen ? (
             <div role="menu" className="absolute right-0 top-12 z-20 w-48 rounded-lg border border-border bg-white p-2 shadow-xl shadow-slate-950/10">
-              {["Today", "Last 7 days", "Last 30 days", "Last 90 days", "Current month", "Previous month"].map((range) => (
+              {adminDateRanges.map((range) => (
                 <button
                   key={range}
                   role="menuitem"
                   className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-primary"
                   onClick={() => {
-                    setDateRange(range);
                     setDateOpen(false);
+                    router.push(`${pathname}?${setDateRangeSearchParam(searchParams, range).toString()}`);
+                    router.refresh();
                   }}
                 >
                   {range}

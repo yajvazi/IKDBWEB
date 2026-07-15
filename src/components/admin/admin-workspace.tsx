@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   Copy,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/admin/status-badge";
 import type { AdminRecord, AdminWorkspaceConfig } from "@/components/admin/operations-data";
 import type { StatusTone } from "@/types/admin";
+import { adminDateRanges, defaultAdminDateRange, isDateInAdminRange, normalizeAdminDateRange, setDateRangeSearchParam } from "@/lib/dates/admin-date-range";
 import { showToast } from "@/lib/toastify";
 import { cn } from "@/lib/utils";
 
@@ -29,11 +31,12 @@ type Props = {
   initialQuery?: string;
 };
 
-const dateRanges = ["Today", "Last 7 days", "Last 30 days", "Last 90 days", "Current month", "Previous month", "Custom range"];
-
 export function AdminWorkspace({ config, detailBasePath, initialQuery = "" }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState(initialQuery);
-  const [dateRange, setDateRange] = useState("Last 30 days");
+  const dateRange = normalizeAdminDateRange(searchParams.get("range"));
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState(config.records[0]?.id ?? "");
   const [records, setRecords] = useState(config.records);
@@ -62,6 +65,7 @@ export function AdminWorkspace({ config, detailBasePath, initialQuery = "" }: Pr
         .toLowerCase();
 
       const matchesQuery = normalizedQuery.length === 0 || searchable.includes(normalizedQuery);
+      const matchesDate = recordMatchesDateRange(record, dateRange);
       const matchesFilters = config.filters.every((filter) => {
         const value = filterValues[filter.key];
         if (!value || value === "All") return true;
@@ -69,11 +73,11 @@ export function AdminWorkspace({ config, detailBasePath, initialQuery = "" }: Pr
         return record.category === value || Object.values(record.fields).includes(value);
       });
 
-      return matchesQuery && matchesFilters;
+      return matchesQuery && matchesDate && matchesFilters;
     });
-  }, [config.filters, filterValues, query, records]);
+  }, [config.filters, dateRange, filterValues, query, records]);
 
-  const selectedRecord = records.find((record) => record.id === selectedId) ?? filteredRecords[0] ?? records[0];
+  const selectedRecord = filteredRecords.find((record) => record.id === selectedId) ?? filteredRecords[0];
 
   function pushLog(message: string) {
     setActionLog((current) => [`${new Date().toLocaleTimeString()} - ${message}`, ...current].slice(0, 8));
@@ -269,10 +273,16 @@ export function AdminWorkspace({ config, detailBasePath, initialQuery = "" }: Pr
             <select
               className="h-10 rounded-md border border-border bg-white px-3 text-sm font-medium text-slate-700 outline-none ring-primary/20 focus:ring-4"
               value={dateRange}
-              onChange={(event) => setDateRange(event.target.value)}
+              onChange={(event) => {
+                const nextRange = normalizeAdminDateRange(event.target.value);
+                router.push(`${pathname}?${setDateRangeSearchParam(searchParams, nextRange).toString()}`);
+                router.refresh();
+                pushLog(`Date range set to ${nextRange}.`);
+                showToast(`Date range set to ${nextRange}.`, "info");
+              }}
               aria-label="Date range"
             >
-              {dateRanges.map((range) => (
+              {adminDateRanges.map((range) => (
                 <option key={range}>{range}</option>
               ))}
             </select>
@@ -296,7 +306,8 @@ export function AdminWorkspace({ config, detailBasePath, initialQuery = "" }: Pr
               onClick={() => {
                 setQuery("");
                 setFilterValues({});
-                setDateRange("Last 30 days");
+                router.push(`${pathname}?${setDateRangeSearchParam(searchParams, defaultAdminDateRange).toString()}`);
+                router.refresh();
                 pushLog("Filters reset.");
               }}
             >
@@ -586,4 +597,46 @@ function maskSecret(value: string) {
 
 function maskForSearch(value: string) {
   return value.replace(/[^\s-]{5,}/g, (match) => `${match.slice(0, 4)}${match.slice(-4)}`);
+}
+
+function recordMatchesDateRange(record: AdminRecord, dateRange: string) {
+  const date = findRecordDate(record);
+  return date ? isDateInAdminRange(date, dateRange) : true;
+}
+
+function findRecordDate(record: AdminRecord) {
+  const candidates = [
+    record.createdAt,
+    record.fields.createdAt,
+    record.fields.createdDate,
+    record.fields.purchaseDate,
+    record.fields.registrationDate,
+    record.fields.lastPurchase,
+    record.fields.assigned,
+    record.fields.activated,
+    record.fields.received,
+    record.fields.timestamp,
+    record.fields.lastUpdated,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parseRecordDate(candidate);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function parseRecordDate(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+
+  const raw = String(value).trim();
+  if (!raw || raw === "n/a" || raw === "pending" || raw === "Never") return null;
+
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  const withCurrentYear = new Date(`${raw}, ${new Date().getFullYear()}`);
+  return Number.isNaN(withCurrentYear.getTime()) ? null : withCurrentYear;
 }

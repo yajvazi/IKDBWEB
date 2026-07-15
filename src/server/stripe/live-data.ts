@@ -2,6 +2,7 @@ import type { AdminRecord, AdminWorkspaceConfig } from "@/components/admin/opera
 import { customersConfig, ordersConfig, paymentsConfig } from "@/components/admin/operations-data";
 import type { KpiMetric, StatusTone } from "@/types/admin";
 import { getCachedCharges, getCachedCustomers, getCachedPaymentIntents, getLatestStripeBalanceSummary, getStripeCacheStatus } from "@/server/stripe/cache";
+import { isDateInAdminRange, normalizeAdminDateRange } from "@/lib/dates/admin-date-range";
 import type Stripe from "stripe";
 
 const eur = new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" });
@@ -158,12 +159,15 @@ export async function getCustomersWorkspaceConfig(options: StripeCursorOptions =
   }
 }
 
-export async function getDashboardKpis(): Promise<KpiMetric[]> {
+export async function getDashboardKpis(dateRangeInput?: string): Promise<KpiMetric[]> {
   try {
-    const [paymentIntents, charges] = await Promise.all([
+    const [allPaymentIntents, allCharges] = await Promise.all([
       getCachedPaymentIntents({ sync: true }),
       getCachedCharges({ sync: true }),
     ]);
+    const range = normalizeAdminDateRange(dateRangeInput);
+    const paymentIntents = allPaymentIntents.filter((payment) => isDateInAdminRange(payment.created * 1000, range));
+    const charges = allCharges.filter((charge) => isDateInAdminRange(charge.created * 1000, range));
 
     const succeeded = paymentIntents.filter((payment) => payment.status === "succeeded");
     const failed = paymentIntents.filter((payment) => payment.status === "requires_payment_method" || payment.status === "canceled");
@@ -175,13 +179,13 @@ export async function getDashboardKpis(): Promise<KpiMetric[]> {
     const packagesSold = succeeded.reduce((sum, payment) => sum + Number(payment.metadata?.quantity ?? 1), 0);
 
     return dashboardKpiTemplates.map((metric) => {
-      if (metric.label === "Gross revenue") return { ...metric, value: formatMinor(grossMinor), previous: "All Stripe history", change: "live", trend: "up" };
-      if (metric.label === "Net revenue") return { ...metric, value: formatMinor(netMinor), previous: "All Stripe history", change: "live", trend: "up" };
-      if (metric.label === "Packages sold") return { ...metric, value: packagesSold.toLocaleString(), previous: "Stripe metadata", change: "live", trend: "up" };
-      if (metric.label === "Successful payments") return { ...metric, value: succeeded.length.toLocaleString(), previous: "All Stripe history", change: "live", trend: "up" };
-      if (metric.label === "Failed payments") return { ...metric, value: failed.length.toLocaleString(), previous: "All Stripe history", change: "live", trend: failed.length > 0 ? "down" : "up" };
-      if (metric.label === "Refunds") return { ...metric, value: formatMinor(refundedMinor), previous: "All Stripe history", change: "live", trend: refundedMinor > 0 ? "down" : "up" };
-      if (metric.label === "Average order value") return { ...metric, value: formatMinor(aovMinor), previous: "All Stripe history", change: "live", trend: "up" };
+      if (metric.label === "Gross revenue") return { ...metric, value: formatMinor(grossMinor), previous: range, change: "live", trend: "up" };
+      if (metric.label === "Net revenue") return { ...metric, value: formatMinor(netMinor), previous: range, change: "live", trend: "up" };
+      if (metric.label === "Packages sold") return { ...metric, value: packagesSold.toLocaleString(), previous: range, change: "live", trend: "up" };
+      if (metric.label === "Successful payments") return { ...metric, value: succeeded.length.toLocaleString(), previous: range, change: "live", trend: "up" };
+      if (metric.label === "Failed payments") return { ...metric, value: failed.length.toLocaleString(), previous: range, change: "live", trend: failed.length > 0 ? "down" : "up" };
+      if (metric.label === "Refunds") return { ...metric, value: formatMinor(refundedMinor), previous: range, change: "live", trend: refundedMinor > 0 ? "down" : "up" };
+      if (metric.label === "Average order value") return { ...metric, value: formatMinor(aovMinor), previous: range, change: "live", trend: "up" };
       return metric;
     });
   } catch (error) {
@@ -190,14 +194,17 @@ export async function getDashboardKpis(): Promise<KpiMetric[]> {
   }
 }
 
-export async function getDashboardAnalytics() {
+export async function getDashboardAnalytics(dateRangeInput?: string) {
   let paymentIntents: Stripe.PaymentIntent[] = [];
   let charges: Stripe.Charge[] = [];
+  const range = normalizeAdminDateRange(dateRangeInput);
   try {
-    [paymentIntents, charges] = await Promise.all([
+    const [allPaymentIntents, allCharges] = await Promise.all([
       getCachedPaymentIntents({ sync: true }),
       getCachedCharges({ sync: true }),
     ]);
+    paymentIntents = allPaymentIntents.filter((payment) => isDateInAdminRange(payment.created * 1000, range));
+    charges = allCharges.filter((charge) => isDateInAdminRange(charge.created * 1000, range));
   } catch (error) {
     console.warn("Stripe dashboard analytics fetch failed; returning empty live analytics.", safeError(error));
   }
